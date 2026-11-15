@@ -55,9 +55,12 @@ def control_pair(scope):
             deny.append(button)
         elif ALLOW.fullmatch(name) or button.get_attribute("data-hatch-approval-primary-action") == "true":
             allow.append(button)
-    if not deny or len(allow) != 1:
+    if not deny or not allow:
         return None
-    return allow[0]
+    # Prefer an ordinary one-time Allow as fallback; the persistent grant is
+    # chosen separately by choose_allow when available.
+    normal = [button for button in allow if not ALWAYS.search(label(button))]
+    return normal[0] if normal else allow[0]
 
 
 def approval_items(page):
@@ -214,7 +217,8 @@ def main():
             seen = set()
             totals = [0, 0, 0]
             while time.monotonic() < end:
-                open_review_panel(page)
+                if not approval_items(page):
+                    open_review_panel(page)
                 scanned, clicked, blocked = scan_once(
                     page, mode, seen, config["prefer_always"],
                     config["max_approvals_per_run"] - totals[1],

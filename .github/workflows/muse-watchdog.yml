@@ -1,0 +1,26 @@
+name: Muse schedule health watchdog
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/muse-watchdog.yml']
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Check recent scheduled Muse watcher runs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/check_health.py --max-age-minutes 30

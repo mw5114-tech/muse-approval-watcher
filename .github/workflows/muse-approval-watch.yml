@@ -6,13 +6,17 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'observe never clicks; apply permits exact allowlisted public reads'
+        description: 'observe never clicks; apply uses all-card mode when enabled in config'
         required: true
         default: observe
         type: choice
         options:
           - observe
           - apply
+
+  push:
+    branches: [main]
+    paths: ['.github/workflows/muse-approval-watch.yml']
 
 permissions:
   contents: read
@@ -24,7 +28,7 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 9
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,7 +45,7 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Run approval safety tests
         if: github.event_name == 'push'
-        run: python -m unittest discover -s tests -p 'test_approval_actions.py' -v
+        run: python -m unittest discover -s tests -p 'test_approve_all.py' -v
       - name: Check pending Muse approvals
         env:
           MUSE_AUTH_B64: ${{ secrets.MUSE_AUTH_B64 }}
@@ -58,4 +62,4 @@ jobs:
           MUSE_AUTH_B64_11: ${{ secrets.MUSE_AUTH_B64_11 }}
           MUSE_AUTH_B64_12: ${{ secrets.MUSE_AUTH_B64_12 }}
           WATCH_MODE: ${{ github.event_name == 'schedule' && 'apply' || github.event_name == 'workflow_dispatch' && inputs.mode || 'observe' }}
-        run: python scripts/actions_approval_watcher.py --mode "$WATCH_MODE" --config approval_policy.json
+        run: python scripts/approve_all.py --mode "$WATCH_MODE" --config approval_policy.json

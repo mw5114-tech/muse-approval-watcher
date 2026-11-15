@@ -3,16 +3,42 @@ Never emits cookies, tokens, page content, screenshots, or complete page URLs.
 """
 import base64
 import gzip
+import hashlib
 import json
 import os
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
+def read_encoded_secret():
+    single = os.environ.get("MUSE_AUTH_B64", "").strip()
+    parts = [os.environ.get(f"MUSE_AUTH_B64_{i:02d}", "").strip()
+             for i in range(1, 13)]
+    if single and any(parts):
+        raise ValueError("Remove obsolete MUSE_AUTH_B64 when using split secrets")
+    if single:
+        return single
+    if not parts[0]:
+        raise ValueError("No Muse login secrets configured")
+    header = parts[0].split(":", 3)
+    if len(header) != 4 or header[0] != "muse1":
+        raise ValueError("Split Muse secret header is invalid")
+    try:
+        count = int(header[1])
+    except ValueError:
+        raise ValueError("Split Muse secret count is invalid") from None
+    if not (2 <= count <= len(parts)):
+        raise ValueError("Split Muse secret count is out of range")
+    if not all(parts[:count]) or any(parts[count:]):
+        raise ValueError("One or more Muse secret parts are missing or unexpected")
+    encoded = header[3] + "".join(parts[1:count])
+    if hashlib.sha256(encoded.encode("ascii")).hexdigest()[:16] != header[2]:
+        raise ValueError("Muse secret part integrity check failed")
+    return encoded
+
+
 def load_state():
-    encoded = os.environ.get("MUSE_AUTH_B64", "")
-    if not encoded:
-        raise ValueError("MUSE_AUTH_B64 is not set")
+    encoded = read_encoded_secret()
     raw = gzip.decompress(base64.b64decode(encoded, validate=True))
     if len(raw) > 2_000_000:
         raise ValueError("Authentication state is unexpectedly large")

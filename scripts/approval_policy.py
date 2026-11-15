@@ -64,8 +64,8 @@ def safe_policy(config):
         raise ValueError("Duplicate allowlisted hosts")
     if config.get("max_approvals_per_run", 0) not in range(1, 21):
         raise ValueError("max_approvals_per_run must be 1..20")
-    if config.get("scan_seconds", 0) not in range(5, 91):
-        raise ValueError("scan_seconds must be 5..90")
+    if config.get("scan_seconds", 0) not in range(5, 241):
+        raise ValueError("scan_seconds must be 5..240")
     if not isinstance(config.get("enabled"), bool):
         raise ValueError("enabled must be a boolean")
     return config

@@ -12,7 +12,7 @@ import re
 import time
 from pathlib import Path
 
-from playwright.sync_api import Error, sync_playwright
+from playwright.sync_api import Error, TimeoutError, sync_playwright
 
 from check_muse_session import auth_status, load_state
 
@@ -198,10 +198,14 @@ def scan_once(page, mode, seen, prefer_always, max_clicks):
         try:
             kind = choose_allow(page, scope, allow, prefer_always)
             clicked += 1
-            page.wait_for_timeout(400)
-            # A click is not proof the backend accepted the approval.
-            still_visible = visible(scope)
-            result = "UNCONFIRMED" if still_visible else "DISMISSED"
+            # Muse reacts asynchronously. Wait briefly for the approval card
+            # to disappear before classifying this as UI-confirmed.
+            # It is still NOT proof the requested external action succeeded.
+            try:
+                scope.wait_for(state="hidden", timeout=1700)
+                result = "DISMISSED"
+            except (TimeoutError, Error):
+                result = "UNCONFIRMED"
             print(f"MUSE_APPROVAL=CLICKED kind={kind} ui={result}", flush=True)
         except Error as error:
             print(f"MUSE_APPROVAL=CLICK_FAILED type={type(error).__name__}", flush=True)

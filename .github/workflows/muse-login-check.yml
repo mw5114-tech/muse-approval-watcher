@@ -2,6 +2,9 @@ name: Muse login smoke test
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/muse-login-check.yml']
 
 permissions:
   contents: read

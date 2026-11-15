@@ -1,6 +1,8 @@
 # Muse approval watcher
 
-Playwright Chromium observer for pending Muse approval cards. It uses DOM changes and a 15-second fallback scan, logs request fingerprints, and classifies exact allowlisted public-news reads for manual review. All other scopes are held. The observer has no approval click path. The live pending-card schema and remote delivery have yet to be validated.
+Playwright Chromium observer for pending Muse approval cards. It uses DOM changes and a 15-second fallback scan, logs request fingerprints, and classifies exact allowlisted public-news reads for manual review. All other scopes are held. The observer has no approval click path.
+
+On 2026-11-15, a separately signed-in browser showed the same nine pending scheduled-task approvals reported by the operator. Eight were labeled external information sharing. The web-access prompt disclosed an HTTP GET for an advertising image and a `tool.exec` policy label. This verifies visibility in a separate browser session. An Oracle-hosted browser, the production selectors, and approval effects still require verification.
 
 Run the local tests with `python -m pip install -r requirements.txt`, `python -m playwright install chromium` and `python -m unittest -v`. The Chromium tests supply a synthetic page and intercept its network requests. They do not contact Muse.
 

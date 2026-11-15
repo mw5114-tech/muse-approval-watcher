@@ -142,7 +142,8 @@ def process_cards(page, config, mode, attempted):
             continue
         if decision != "allow_read" or not config["enabled"] or mode != "apply":
             held += 1
-            print(f"MUSE_CARD=HELD reason={reason} host={host or '-'}")
+            event = "OBSERVED" if decision == "allow_read" and mode == "observe" else "HELD"
+            print(f"MUSE_CARD={event} reason={reason} host={host or '-'}")
             attempted.add(token)
             continue
         if approved >= config["max_approvals_per_run"]:
@@ -184,7 +185,7 @@ def run(mode, config):
                 if total_approved >= config["max_approvals_per_run"]:
                     break
                 page.wait_for_timeout(1000)
-            print(f"MUSE_WATCHER=COMPLETE observed={total_scanned} clicked={total_approved} held={total_held}")
+            print(f"MUSE_WATCHER=COMPLETE inspections={total_scanned} unique_cards={len(attempted)} clicked={total_approved} held={total_held}")
             return 0
         finally:
             browser.close()

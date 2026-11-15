@@ -1,0 +1,13 @@
+{
+  "url": "https://muse.ai/",
+  "card_selector": "",
+  "pending_marker": "",
+  "request_id_attribute": "",
+  "fields": {
+    "site": "",
+    "chat": "",
+    "action": "",
+    "scope": ""
+  },
+  "rules": []
+}

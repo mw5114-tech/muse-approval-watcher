@@ -1,0 +1,30 @@
+[Unit]
+Description=Muse pending approval observer
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=muse-watcher
+Group=muse-watcher
+WorkingDirectory=/opt/muse-watcher
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/muse-watcher/browsers
+EnvironmentFile=/etc/muse-watcher/environment
+ExecStart=/opt/muse-watcher/.venv/bin/python /opt/muse-watcher/watcher.py
+Restart=on-failure
+RestartSec=15
+RestartPreventExitStatus=20 78
+MemoryHigh=900M
+MemoryMax=1500M
+OOMPolicy=kill
+UMask=0077
+StateDirectory=muse-watcher
+StateDirectoryMode=0700
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

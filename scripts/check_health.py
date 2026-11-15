@@ -155,7 +155,7 @@ def main():
     # A dispatch was accepted, so a gap alone is not a failure; the next
     # watchdog run will re-check. Avoid false "all jobs failed" notifications
     # for transient GitHub scheduling delays.
-    return 1 if level == "error" or (level == "critical" and not dispatch) else 0
+    return 1 if level in {"error", "critical"} else 0
 
 
 if __name__ == "__main__":

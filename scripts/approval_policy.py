@@ -56,7 +56,8 @@ def decide(text, hosts):
 def safe_policy(config):
     hosts = config.get("allowed_read_hosts", [])
     if not isinstance(hosts, list) or not all(
-        isinstance(h, str) and h and normalized_host(h) == h for h in hosts
+        isinstance(h, str) and h and normalized_host(h) == h and
+        re.fullmatch(r"[a-z0-9-]+(?:\.[a-z0-9-]+)+", h) for h in hosts
     ):
         raise ValueError("allowed_read_hosts must contain normalized hosts")
     if len(hosts) != len(set(hosts)):

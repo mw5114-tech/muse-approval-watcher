@@ -104,6 +104,25 @@ def open_review_panel(page):
     return False
 
 
+def expand_pending_preview(page):
+    """Expand one collapsed approval row from Muse's review panel."""
+    try:
+        panels = page.locator(CARD + '[data-hatch-approval-surface="panel"]')
+        if not panels.count():
+            return False
+        section = panels.first.locator("xpath=ancestor::section[1]")
+        for preview in section.locator('button[aria-expanded="false"]').all():
+            if not visible(preview):
+                continue
+            if preview.locator('xpath=ancestor::*[@data-testid="hatch-inline-approval-card"]').count():
+                continue
+            preview.click(timeout=1300)
+            return True
+    except Error:
+        pass
+    return False
+
+
 def stable_id(scope):
     """Assign an ephemeral, non-secret ID so duplicate-looking cards aren't skipped."""
     try:
@@ -216,9 +235,15 @@ def main():
             end = time.monotonic() + config["scan_seconds"]
             seen = set()
             totals = [0, 0, 0]
+            last_panel_open = 0
             while time.monotonic() < end:
-                if not approval_items(page):
-                    open_review_panel(page)
+                now = time.monotonic()
+                if now - last_panel_open >= 10:
+                    if not approval_items(page):
+                        open_review_panel(page)
+                    else:
+                        expand_pending_preview(page)
+                    last_panel_open = now
                 scanned, clicked, blocked = scan_once(
                     page, mode, seen, config["prefer_always"],
                     config["max_approvals_per_run"] - totals[1],

@@ -88,13 +88,18 @@ def open_review_panel(page):
                 if visible(button):
                     button.click(timeout=1300)
                     return True
+        tab_found = False
         for tab in page.locator("button[aria-pressed]").all():
             name = (tab.get_attribute("aria-label") or "").strip().lower()
-            if name in REVIEW_TAB and tab.get_attribute("aria-pressed") != "true":
-                tab.click(timeout=1300)
-                return True
+            if name in REVIEW_TAB:
+                tab_found = True
+                if tab.get_attribute("aria-pressed") != "true":
+                    tab.click(timeout=1300)
+                    return True
+                return False
         # Approvals sometimes live behind the account avatar.
-        if not page.locator(CARD).count():
+        # Never toggle the avatar if the approval tab is already available.
+        if not tab_found and not page.locator(CARD).count():
             avatar = page.locator('[data-hatch-avatar-interaction="true"]')
             if avatar.count() and visible(avatar.first):
                 avatar.first.click(timeout=1300)
@@ -126,6 +131,12 @@ def expand_pending_preview(page):
 def stable_id(scope):
     """Assign an ephemeral, non-secret ID so duplicate-looking cards aren't skipped."""
     try:
+        server_id = (
+            scope.get_attribute("data-hatch-approval-id")
+            or scope.get_attribute("data-maa-approval-id")
+        )
+        if server_id:
+            return "approval:" + server_id
         return scope.evaluate("""el => {
             if (!el.dataset.museWatcherId) {
               window.__museApprovalSequence = (window.__museApprovalSequence || 0) + 1;
@@ -177,11 +188,11 @@ def scan_once(page, mode, seen, prefer_always, max_clicks):
         if allow is None:
             blocked += 1
             seen.add(key)
-            print("MUSE_APPROVAL=UNRECOGNIZED")
+            print("MUSE_APPROVAL=UNRECOGNIZED", flush=True)
             continue
         if mode == "observe":
             seen.add(key)
-            print("MUSE_APPROVAL=DETECTED")
+            print("MUSE_APPROVAL=DETECTED", flush=True)
             continue
         seen.add(key)   # Never double-click the same DOM approval within a run.
         try:
@@ -191,9 +202,9 @@ def scan_once(page, mode, seen, prefer_always, max_clicks):
             # A click is not proof the backend accepted the approval.
             still_visible = visible(scope)
             result = "UNCONFIRMED" if still_visible else "DISMISSED"
-            print(f"MUSE_APPROVAL=CLICKED kind={kind} ui={result}")
+            print(f"MUSE_APPROVAL=CLICKED kind={kind} ui={result}", flush=True)
         except Error as error:
-            print(f"MUSE_APPROVAL=CLICK_FAILED type={type(error).__name__}")
+            print(f"MUSE_APPROVAL=CLICK_FAILED type={type(error).__name__}", flush=True)
     return scanned, clicked, blocked
 
 
@@ -208,8 +219,8 @@ def validate_config(config):
     if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 100:
         raise ValueError("max_approvals_per_run must be 1..100")
     seconds = config.get("scan_seconds")
-    if not isinstance(seconds, int) or isinstance(seconds, bool) or not 5 <= seconds <= 240:
-        raise ValueError("scan_seconds must be 5..240")
+    if not isinstance(seconds, int) or isinstance(seconds, bool) or not 5 <= seconds <= 270:
+        raise ValueError("scan_seconds must be 5..270")
     return config
 
 
@@ -221,29 +232,51 @@ def main():
     config = validate_config(json.loads(Path(args.config).read_text(encoding="utf-8")))
     mode = args.mode if config["enabled"] and (args.mode == "observe" or config["approve_all"]) else "observe"
     state = load_state()
-    print(f"MUSE_WATCHER=START mode={mode}")
+    print(f"MUSE_WATCHER=START mode={mode}", flush=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         try:
             context = browser.new_context(storage_state=state, locale="ko-KR")
             page = context.new_page()
-            page.goto("https://muse.ai/", wait_until="domcontentloaded", timeout=45000)
-            page.wait_for_timeout(5000)
-            if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
-                print("MUSE_WATCHER=AUTH_REQUIRED")
+            # A transient navigation failure should not permanently skip a run.
+            for attempt in range(2):
+                try:
+                    page.goto("https://muse.ai/", wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(3500)
+                    if auth_status(page) == "AUTHENTICATED_UI_PRESENT":
+                        break
+                except Error:
+                    if attempt:
+                        print("MUSE_WATCHER=NAVIGATION_FAILED", flush=True)
+                        return 2
+                if attempt == 0:
+                    page.wait_for_timeout(2000)
+            else:
+                print("MUSE_WATCHER=AUTH_REQUIRED_OR_SITE_UNAVAILABLE", flush=True)
                 return 2
             end = time.monotonic() + config["scan_seconds"]
             seen = set()
             totals = [0, 0, 0]
             last_panel_open = 0
+            last_heartbeat = time.monotonic()
             while time.monotonic() < end:
                 now = time.monotonic()
                 if now - last_panel_open >= 10:
-                    if not approval_items(page):
-                        open_review_panel(page)
-                    else:
-                        expand_pending_preview(page)
+                    # Open the review panel even when the active chat has
+                    # approval cards; other scheduled tasks may be waiting.
+                    open_review_panel(page)
+                    expand_pending_preview(page)
                     last_panel_open = now
+                if now - last_heartbeat >= 45:
+                    if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
+                        print("MUSE_WATCHER=AUTH_LOST_DURING_RUN", flush=True)
+                        return 2
+                    print(
+                        f"MUSE_HEARTBEAT scanned={totals[0]} clicked={totals[1]} "
+                        f"unrecognized={totals[2]}",
+                        flush=True,
+                    )
+                    last_heartbeat = now
                 scanned, clicked, blocked = scan_once(
                     page, mode, seen, config["prefer_always"],
                     config["max_approvals_per_run"] - totals[1],
@@ -252,10 +285,10 @@ def main():
                 totals[1] += clicked
                 totals[2] += blocked
                 if totals[1] >= config["max_approvals_per_run"]:
-                    print("MUSE_WATCHER=LIMIT_REACHED")
+                    print("MUSE_WATCHER=LIMIT_REACHED", flush=True)
                     break
                 page.wait_for_timeout(1000)
-            print(f"MUSE_WATCHER=COMPLETE observed={totals[0]} clicked={totals[1]} unrecognized={totals[2]}")
+            print(f"MUSE_WATCHER=COMPLETE observed={totals[0]} clicked={totals[1]} unrecognized={totals[2]}", flush=True)
             return 0
         finally:
             browser.close()
@@ -265,5 +298,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except Exception as error:
-        print(f"MUSE_WATCHER=ERROR type={type(error).__name__}")
+        print(f"MUSE_WATCHER=ERROR type={type(error).__name__}", flush=True)
         raise SystemExit(2)

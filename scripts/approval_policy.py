@@ -19,7 +19,7 @@ BLOCK_RE = re.compile(
     r"delete|modify|update|post|publish|email|send message|"
     r"oauth|credential|token|cookie|password|secret|"
     r"이메일 주소|email address|계좌|은행|bank account|"
-    r"예약 작업에 대한 웹 접근 허용|예약 작업에 대한 항목", re.I
+    r"예약 작업에 대한 웹 접근 허용", re.I
 )
 ALLOWED_TEXT_RE = re.compile(r"^(?:한\s*번만\s*허용|이번만\s*허용|허용|Allow|Allow once|Allow this time)$", re.I)
 ALWAYS_TEXT_RE = re.compile(r"^(?:이\s*사이트에\s*대해\s*(?:계속|항상)\s*허용|계속 허용|항상 허용|Always allow|Allow always|Always allow for this site)$", re.I)

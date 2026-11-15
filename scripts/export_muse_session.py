@@ -77,14 +77,20 @@ def select_export(state):
         ("Muse 쿠키 + 인증 관련 로컬 저장소", dict(include_idb="none", local_storage="auth")),
         ("Muse 쿠키만", dict(include_idb="none", local_storage="none")),
     )
-    for label, opts in candidates:
+    feasible = []
+    for priority, (label, opts) in enumerate(candidates):
         compact = compact_state(state, **opts)
         if not compact["cookies"] and not any(o["localStorage"] or o.get("indexedDB") for o in compact["origins"]):
             continue
         encoded = encode_state(compact)
         if len(encoded) <= MAX_PARTS * PART_SIZE:
-            return label, make_secrets(encoded)
-    raise ValueError("Muse 인증 데이터가 최적화 후에도 너무 큽니다. 로그인 보존 방식을 다시 확인해야 합니다.")
+            secrets = make_secrets(encoded)
+            feasible.append((len(secrets), priority, label, secrets))
+    if not feasible:
+        raise ValueError("Muse 인증 데이터가 최적화 후에도 너무 큽니다. 로그인 보존 방식을 다시 확인해야 합니다.")
+    # Prefer a single Secret where possible; use richer state if equally small.
+    _, _, label, secrets = min(feasible, key=lambda item: (item[0], item[1]))
+    return label, secrets
 
 
 def copy_and_prompt(name, value, position, count):

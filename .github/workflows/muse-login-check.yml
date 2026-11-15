@@ -22,4 +22,16 @@ jobs:
       - name: Verify Muse login session (no approvals or changes)
         env:
           MUSE_AUTH_B64: ${{ secrets.MUSE_AUTH_B64 }}
+          MUSE_AUTH_B64_01: ${{ secrets.MUSE_AUTH_B64_01 }}
+          MUSE_AUTH_B64_02: ${{ secrets.MUSE_AUTH_B64_02 }}
+          MUSE_AUTH_B64_03: ${{ secrets.MUSE_AUTH_B64_03 }}
+          MUSE_AUTH_B64_04: ${{ secrets.MUSE_AUTH_B64_04 }}
+          MUSE_AUTH_B64_05: ${{ secrets.MUSE_AUTH_B64_05 }}
+          MUSE_AUTH_B64_06: ${{ secrets.MUSE_AUTH_B64_06 }}
+          MUSE_AUTH_B64_07: ${{ secrets.MUSE_AUTH_B64_07 }}
+          MUSE_AUTH_B64_08: ${{ secrets.MUSE_AUTH_B64_08 }}
+          MUSE_AUTH_B64_09: ${{ secrets.MUSE_AUTH_B64_09 }}
+          MUSE_AUTH_B64_10: ${{ secrets.MUSE_AUTH_B64_10 }}
+          MUSE_AUTH_B64_11: ${{ secrets.MUSE_AUTH_B64_11 }}
+          MUSE_AUTH_B64_12: ${{ secrets.MUSE_AUTH_B64_12 }}
         run: python scripts/check_muse_session.py

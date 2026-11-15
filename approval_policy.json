@@ -3,5 +3,5 @@
   "approve_all": true,
   "prefer_always": true,
   "max_approvals_per_run": 50,
-  "scan_seconds": 240
+  "scan_seconds": 260
 }

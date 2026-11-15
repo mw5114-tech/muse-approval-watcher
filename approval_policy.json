@@ -1,9 +1,7 @@
 {
   "enabled": true,
-  "allowed_read_hosts": [
-    "yna.co.kr"
-  ],
-  "prefer_always_for_site": true,
-  "max_approvals_per_run": 10,
-  "scan_seconds": 180
+  "approve_all": false,
+  "prefer_always": true,
+  "max_approvals_per_run": 50,
+  "scan_seconds": 240
 }

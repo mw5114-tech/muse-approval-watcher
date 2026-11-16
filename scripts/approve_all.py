@@ -263,7 +263,12 @@ def scan_once(page, mode, seen, prefer_always, max_clicks, *,
         # a preceding approval disappears after an action.
         for scope in approval_items(page, panel_only=panel_only):
             card_id = stable_id(scope)
-            key = identity_prefix + card_id if card_id is not None else None
+            # A real approval ID is globally unique across review rows.
+            # The row prefix is only a fallback for DOM-only temporary IDs.
+            key = (
+                card_id if card_id and card_id.startswith("approval:")
+                else identity_prefix + card_id if card_id is not None else None
+            )
             if key is None or key in seen or key in inspected_this_pass:
                 continue
             record = retry_state.get(key)

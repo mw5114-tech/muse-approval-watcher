@@ -185,21 +185,20 @@ def card_fingerprint(scope):
         return None
 
 
-def wait_card_gone(page, scope, timeout_ms=2200):
-    """Observe the original element, not a .nth() locator that may reindex.
+def wait_card_gone(page, original_handle, timeout_ms=2200):
+    """Observe the PRE-CLICK element, not a .nth() locator that may reindex.
 
     A card disappearing is a UI acknowledgement, NOT proof that an external
     tool call or other side effect succeeded.
     """
-    handle = scope.element_handle(timeout=1000)
-    if not handle:
+    if original_handle is None:
         return False
     try:
         page.wait_for_function(
             """el => !el.isConnected || el.hidden ||
               el.getClientRects().length === 0 ||
               getComputedStyle(el).visibility === 'hidden'""",
-            arg=handle,
+            arg=original_handle,
             timeout=timeout_ms,
         )
         return True
@@ -287,9 +286,13 @@ def scan_once(page, mode, seen, prefer_always, max_clicks, *,
 
         record["attempts"] += 1
         try:
+            # Capture the exact DOM node BEFORE clicking; other cards may shift.
+            original_handle = scope.element_handle(timeout=1000)
+            if original_handle is None:
+                raise Error("Approval element not available")
             kind = choose_allow(page, scope, allow, prefer_always)
             clicked += 1
-            dismissed = wait_card_gone(page, scope, timeout_ms=confirmation_timeout_ms)
+            dismissed = wait_card_gone(page, original_handle, timeout_ms=confirmation_timeout_ms)
             if dismissed:
                 seen.add(key)
                 retry_state.pop(key, None)

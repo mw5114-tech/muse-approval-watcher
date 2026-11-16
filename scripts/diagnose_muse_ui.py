@@ -120,9 +120,10 @@ def inspect_review_buttons(page):
             fingerprints.update(after)
             if after != before:
                 transitions += 1
+            primary_visible = count_visible(page.locator(PRIMARY_ACTION))[1]
             details.append(
                 f"{i}:{expanded_before}:{int(after != before)}:"
-                f"{page.locator(PRIMARY_ACTION).count()}"
+                f"{primary_visible}"
             )
         except Error:
             details.append(f"{i}:error")

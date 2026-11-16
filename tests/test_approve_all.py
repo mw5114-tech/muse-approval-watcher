@@ -243,6 +243,59 @@ class AllApprovalsTests(unittest.TestCase):
             finally:
                 browser.close()
 
+    def test_retry_waits_for_cooldown_instead_of_hammering(self):
+        html = """<article data-testid="hatch-inline-approval-card" data-hatch-approval-id="cooldown">
+            <button id="retry" onclick="this.dataset.count=String(Number(this.dataset.count||0)+1)">허용</button>
+            <button>거부</button></article>"""
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                page.set_content(html)
+                seen, retries = set(), {}
+                one = scan_once(
+                    page, "apply", seen, False, 5,
+                    retry_state=retries, max_attempts=3,
+                    retry_delay_seconds=30, confirmation_timeout_ms=120,
+                )
+                two = scan_once(
+                    page, "apply", seen, False, 5,
+                    retry_state=retries, max_attempts=3,
+                    retry_delay_seconds=30, confirmation_timeout_ms=120,
+                )
+                self.assertEqual((one[1], two[1]), (1, 0))
+                self.assertEqual(page.locator("#retry").get_attribute("data-count"), "1")
+            finally:
+                browser.close()
+
+    def test_disabled_button_is_never_retried(self):
+        html = """<article data-testid="hatch-inline-approval-card" data-hatch-approval-id="disabled">
+            <button id="retry" onclick="
+                this.dataset.count=String(Number(this.dataset.count||0)+1);
+                this.disabled=true
+            ">허용</button>
+            <button>거부</button></article>"""
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                page.set_content(html)
+                seen, retries = set(), {}
+                one = scan_once(
+                    page, "apply", seen, False, 5,
+                    retry_state=retries, max_attempts=3,
+                    retry_delay_seconds=0, confirmation_timeout_ms=120,
+                )
+                two = scan_once(
+                    page, "apply", seen, False, 5,
+                    retry_state=retries, max_attempts=3,
+                    retry_delay_seconds=0, confirmation_timeout_ms=120,
+                )
+                self.assertEqual((one[1], two[1]), (1, 0))
+                self.assertEqual(page.locator("#retry").get_attribute("data-count"), "1")
+            finally:
+                browser.close()
+
     def test_missing_deny_button_not_clicked(self):
         html = """<article data-testid="hatch-inline-approval-card">
           <button id="yes" onclick="this.dataset.clicked='yes'">허용</button>

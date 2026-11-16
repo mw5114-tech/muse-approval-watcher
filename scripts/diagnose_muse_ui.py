@@ -136,6 +136,51 @@ def inspect_review_buttons(page):
 PRIMARY_ACTION = '[data-hatch-approval-primary-action="true"]'
 
 
+
+def inspect_frame_card_counts(page):
+    pieces = []
+    for index, frame in enumerate(page.frames[:15]):
+        try:
+            all_count = frame.locator(CARD).count()
+            visible_count = count_visible(frame.locator(CARD))[1]
+            primary = frame.locator(PRIMARY_ACTION).count()
+            pieces.append(f"{index}:{all_count}:{visible_count}:{primary}")
+        except Error:
+            pieces.append(f"{index}:error")
+    print("MUSE_UI_DIAG frame_counts=" + ",".join(pieces), flush=True)
+
+
+def inspect_review_button_structure(page):
+    group = page.get_by_role("button", name=REVIEW)
+    details = []
+    for i in range(min(group.count(), 14)):
+        node = group.nth(i)
+        if not node.is_visible():
+            continue
+        try:
+            expanded = node.get_attribute("aria-expanded")
+            pressed = node.get_attribute("aria-pressed")
+            structure = node.evaluate("""el => {
+              const host = el.closest('[data-testid]');
+              const role = el.closest('[role]');
+              return {
+                tag: el.tagName.toLowerCase(),
+                withinCard: !!el.closest('[data-testid="hatch-inline-approval-card"]'),
+                containerTestId: host?.getAttribute('data-testid') || '-',
+                containerRole: role?.getAttribute('role') || '-'
+              };
+            }""")
+            # No user data, prompts, URLs, IDs or request bodies.
+            details.append(
+                f"{i}:{expanded or '-'}:{pressed or '-'}:"
+                f"{structure['tag']}:{int(structure['withinCard'])}:"
+                f"{structure['containerTestId']}:{structure['containerRole']}"
+            )
+        except Error:
+            details.append(f"{i}:error")
+    print("MUSE_UI_DIAG review_button_structure=" + ",".join(details), flush=True)
+
+
 def main():
     state = load_state()
     with sync_playwright() as p:
@@ -154,6 +199,8 @@ def main():
             stats(page, "after_review_navigation")
             inspect_review_buttons(page)
             stats(page, "after_review_sequence")
+            inspect_frame_card_counts(page)
+            inspect_review_button_structure(page)
             return 0
         finally:
             browser.close()

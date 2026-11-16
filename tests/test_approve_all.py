@@ -118,6 +118,131 @@ class AllApprovalsTests(unittest.TestCase):
             finally:
                 browser.close()
 
+    def test_reindexing_cards_are_all_processed(self):
+        """Click-removal of card 1 must not shift card 2 out of the queue."""
+        html = "".join(
+            f'''<article data-testid="hatch-inline-approval-card" data-hatch-approval-id="{i}">
+                  <p>신규 승인 {i}</p>
+                  <button id="yes{i}" onclick="this.closest('article').remove()">허용</button>
+                  <button>거부</button>
+                </article>'''
+            for i in range(1, 4)
+        )
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                page.set_content(html)
+                scanned, clicked, blocked = scan_once(
+                    page, "apply", set(), False, 10,
+                    confirmation_timeout_ms=150,
+                )
+                self.assertEqual((scanned, clicked, blocked), (3, 3, 0))
+                self.assertEqual(
+                    page.locator('[data-testid="hatch-inline-approval-card"]').count(), 0
+                )
+            finally:
+                browser.close()
+
+    def test_unconfirmed_same_card_retries_at_most_three_times(self):
+        html = """
+          <article data-testid="hatch-inline-approval-card" data-hatch-approval-id="stable-1">
+            <p>승인 처리가 늦은 요청</p>
+            <button id="retry" onclick="
+              this.dataset.count=String(Number(this.dataset.count||0)+1);
+              if(Number(this.dataset.count)>=3)this.closest('article').remove()
+            ">허용</button>
+            <button>거부</button>
+          </article>
+        """
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                page.set_content(html)
+                seen, retries = set(), {}
+                totals = []
+                for _ in range(3):
+                    totals.append(scan_once(
+                        page, "apply", seen, False, 10,
+                        retry_state=retries, max_attempts=3,
+                        retry_delay_seconds=0,
+                        confirmation_timeout_ms=120,
+                    ))
+                self.assertEqual([i[1] for i in totals], [1, 1, 1])
+                self.assertEqual(
+                    page.locator('[data-testid="hatch-inline-approval-card"]').count(), 0
+                )
+                self.assertIn("approval:stable-1", seen)
+                self.assertEqual(
+                    scan_once(page, "apply", seen, False, 10,
+                              retry_state=retries, max_attempts=3,
+                              retry_delay_seconds=0,
+                              confirmation_timeout_ms=120)[1], 0
+                )
+            finally:
+                browser.close()
+
+    def test_unconfirmed_card_stops_after_three_attempts(self):
+        html = """
+          <article data-testid="hatch-inline-approval-card" data-hatch-approval-id="stable-2">
+            <button id="retry" onclick="this.dataset.count=String(Number(this.dataset.count||0)+1)">허용</button>
+            <button>거부</button>
+          </article>
+        """
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                page.set_content(html)
+                seen, retries = set(), {}
+                counts = []
+                for _ in range(4):
+                    counts.append(scan_once(
+                        page, "apply", seen, False, 10,
+                        retry_state=retries, max_attempts=3,
+                        retry_delay_seconds=0,
+                        confirmation_timeout_ms=120,
+                    )[1])
+                self.assertEqual(counts, [1, 1, 1, 0])
+                self.assertEqual(page.locator("#retry").get_attribute("data-count"), "3")
+                self.assertIn("approval:stable-2", seen)
+            finally:
+                browser.close()
+
+    def test_request_changed_after_click_is_not_retried(self):
+        html = """
+          <article data-testid="hatch-inline-approval-card" data-hatch-approval-id="stable-3">
+            <p id="scope">이미 처리 중인 요청</p>
+            <button id="retry" onclick="
+              this.dataset.count=String(Number(this.dataset.count||0)+1);
+              document.getElementById('scope').innerText='권한 범위 변경됨'
+            ">허용</button>
+            <button>거부</button>
+          </article>
+        """
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                page.set_content(html)
+                seen, retries = set(), {}
+                first = scan_once(
+                    page, "apply", seen, False, 10,
+                    retry_state=retries, max_attempts=3,
+                    retry_delay_seconds=0, confirmation_timeout_ms=120,
+                )
+                second = scan_once(
+                    page, "apply", seen, False, 10,
+                    retry_state=retries, max_attempts=3,
+                    retry_delay_seconds=0, confirmation_timeout_ms=120,
+                )
+                self.assertEqual((first[1], second[1]), (1, 0))
+                self.assertEqual(page.locator("#retry").get_attribute("data-count"), "1")
+                self.assertIn("approval:stable-3", seen)
+            finally:
+                browser.close()
+
     def test_missing_deny_button_not_clicked(self):
         html = """<article data-testid="hatch-inline-approval-card">
           <button id="yes" onclick="this.dataset.clicked='yes'">허용</button>

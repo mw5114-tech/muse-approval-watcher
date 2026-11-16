@@ -305,19 +305,19 @@ class AllApprovalsTests(unittest.TestCase):
             <button class="review" aria-expanded="false" onclick="show(1)">검토 필요</button>
             <button class="review" aria-expanded="false" onclick="show(2)">검토 필요</button>
             <article data-testid="hatch-inline-approval-card"
-              data-hatch-approval-surface="panel" class="card" style="display:none">
+              data-hatch-approval-surface="panel" data-row="0" class="card" style="display:none">
               <p>동일한 승인 문구</p>
               <button class="ok" onclick="this.closest('article').remove()">허용</button>
               <button>거부</button>
             </article>
             <article data-testid="hatch-inline-approval-card"
-              data-hatch-approval-surface="panel" class="card" style="display:none">
+              data-hatch-approval-surface="panel" data-row="1" class="card" style="display:none">
               <p>동일한 승인 문구</p>
               <button class="ok" onclick="this.closest('article').remove()">허용</button>
               <button>거부</button>
             </article>
             <article data-testid="hatch-inline-approval-card"
-              data-hatch-approval-surface="panel" class="card" style="display:none">
+              data-hatch-approval-surface="panel" data-row="2" class="card" style="display:none">
               <p>동일한 승인 문구</p>
               <button class="ok" onclick="this.closest('article').remove()">허용</button>
               <button>거부</button>
@@ -328,7 +328,7 @@ class AllApprovalsTests(unittest.TestCase):
               const buttons = [...document.querySelectorAll('.review')];
               const cards = [...document.querySelectorAll('.card')];
               buttons.forEach((b,i) => b.setAttribute('aria-expanded',i===n?'true':'false'));
-              cards.forEach((card,i) => card.style.display = i===n?'block':'none');
+              cards.forEach(card => card.style.display = Number(card.dataset.row)===n?'block':'none');
             }
           </script>"""
         with sync_playwright() as p:

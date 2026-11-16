@@ -3,7 +3,7 @@ name: Muse review panel diagnostics
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/muse-ui-diagnostic.yml']
+    paths: ['.github/workflows/muse-ui-diagnostic.yml', 'scripts/diagnose_muse_ui.py']
   workflow_dispatch:
 
 permissions:

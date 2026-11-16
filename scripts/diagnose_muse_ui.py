@@ -3,6 +3,7 @@
 Only emits numeric counts and known, non-sensitive UI structure signals.
 Does NOT click any approval action, save screenshots, or log user content.
 """
+import hashlib
 import re
 from playwright.sync_api import sync_playwright, Error
 from check_muse_session import auth_status, load_state
@@ -79,6 +80,62 @@ def click_review_navigation(page):
     return "review_nav_not_found"
 
 
+
+def panel_signatures(page):
+    signatures = set()
+    cards = page.locator(SCOPE)
+    for i in range(min(cards.count(), 15)):
+        card = cards.nth(i)
+        if not card.is_visible():
+            continue
+        try:
+            content = card.inner_text(timeout=700)
+            # Only use signatures in memory; never log card contents or hashes.
+            signatures.add(hashlib.sha256(content.encode("utf-8")).digest())
+        except Error:
+            pass
+    return signatures
+
+
+def inspect_review_buttons(page):
+    buttons = page.get_by_role("button", name=REVIEW)
+    max_buttons = min(buttons.count(), 18)
+    fingerprints = set()
+    transitions = 0
+    details = []
+    fingerprints.update(panel_signatures(page))
+    for i in range(max_buttons):
+        buttons = page.get_by_role("button", name=REVIEW)
+        if i >= buttons.count():
+            break
+        node = buttons.nth(i)
+        if not node.is_visible():
+            continue
+        try:
+            before = panel_signatures(page)
+            expanded_before = node.get_attribute("aria-expanded") or "-"
+            node.click(timeout=2000)
+            page.wait_for_timeout(350)
+            after = panel_signatures(page)
+            fingerprints.update(after)
+            if after != before:
+                transitions += 1
+            details.append(
+                f"{i}:{expanded_before}:{int(after != before)}:"
+                f"{page.locator(PRIMARY_ACTION).count()}"
+            )
+        except Error:
+            details.append(f"{i}:error")
+    print(
+        f"MUSE_UI_DIAG review_navigation_count={max_buttons} "
+        f"card_transitions={transitions} unique_card_views={len(fingerprints)} "
+        f"detail={','.join(details)}",
+        flush=True,
+    )
+
+PRIMARY_ACTION = '[data-hatch-approval-primary-action="true"]'
+
+
 def main():
     state = load_state()
     with sync_playwright() as p:
@@ -95,6 +152,8 @@ def main():
             print("MUSE_UI_DIAG navigation=" + result, flush=True)
             page.wait_for_timeout(1600)
             stats(page, "after_review_navigation")
+            inspect_review_buttons(page)
+            stats(page, "after_review_sequence")
             return 0
         finally:
             browser.close()

@@ -27,6 +27,13 @@ ALLOW = re.compile(r"^(?:한\s*번만\s*허용|이번만\s*허용|허용|계속\
 ALWAYS = re.compile(r"(?:계속\s*허용|항상\s*허용|영구\s*허용|Always\s+allow|Allow\s+always)", re.I)
 DENY = re.compile(r"^(?:거부|차단|허용\s*안\s*함|Deny|Reject|Decline|Block)$", re.I)
 REVIEW_TAB = {"approvals", "검토 필요", "승인", "批准", "核可工具"}
+REVIEW_LABEL = re.compile(
+    r"(검토\s*필요|승인\s*요청|승인\s*대기|Needs?\s+review|Review\s+needed|"
+    r"Approvals?|Pending\s+review|Review\s+requests?)", re.I
+)
+STATUS_PANEL = '[data-testid="hatch-status-panel-sliding-surface"]'
+PANEL_CARD = '[data-testid="hatch-inline-approval-card"][data-hatch-approval-surface="panel"]'
+
 MAX_ITEMS_PER_PASS = 75
 
 
@@ -64,9 +71,10 @@ def control_pair(scope):
     return normal[0] if normal else allow[0]
 
 
-def approval_items(page):
+def approval_items(page, *, panel_only=False):
     items = []
-    for card in page.locator(CARD).all():
+    target = PANEL_CARD if panel_only else CARD
+    for card in page.locator(target).all():
         if not visible(card):
             continue
         subs = []
@@ -78,6 +86,32 @@ def approval_items(page):
         else:
             items.append(card)
     return items[:MAX_ITEMS_PER_PASS]
+
+
+
+def review_rows(page):
+    """Only review-needed accordion buttons in Muse's actual status panel."""
+    return page.locator(STATUS_PANEL).get_by_role("button", name=REVIEW_LABEL)
+
+
+def open_review_row(page, index):
+    """Select one distinct pending-review row; never clicks Allow or Deny."""
+    rows = review_rows(page)
+    count = rows.count()
+    if count == 0:
+        return 0, False
+    index = index % count
+    selected = rows.nth(index)
+    try:
+        if not visible(selected):
+            return count, False
+        if selected.get_attribute("aria-expanded") != "true":
+            selected.click(timeout=1800)
+            page.wait_for_timeout(650)
+        # Only process a card if the intended row actually became expanded.
+        return count, review_rows(page).nth(index).get_attribute("aria-expanded") == "true"
+    except Error:
+        return count, False
 
 
 def open_review_panel(page):
@@ -208,7 +242,8 @@ def wait_card_gone(page, original_handle, timeout_ms=2200):
 
 def scan_once(page, mode, seen, prefer_always, max_clicks, *,
               retry_state=None, max_attempts=1,
-              retry_delay_seconds=6.0, confirmation_timeout_ms=2200):
+              retry_delay_seconds=6.0, confirmation_timeout_ms=2200,
+              panel_only=False, identity_prefix=""):
     """Process the queue by re-fetching DOM after EACH click.
 
     With retry_state set, re-click only the SAME still-visible, unchanged
@@ -226,8 +261,9 @@ def scan_once(page, mode, seen, prefer_always, max_clicks, *,
         selected = None
         # Fresh list on every iteration: Playwright nth() locators shift when
         # a preceding approval disappears after an action.
-        for scope in approval_items(page):
-            key = stable_id(scope)
+        for scope in approval_items(page, panel_only=panel_only):
+            card_id = stable_id(scope)
+            key = identity_prefix + card_id if card_id is not None else None
             if key is None or key in seen or key in inspected_this_pass:
                 continue
             record = retry_state.get(key)
@@ -391,12 +427,24 @@ def main():
             retry_state = {}
             totals = [0, 0, 0]
             last_panel_open = 0
+            review_cursor = 0
+            visited_review_rows = set()
             last_heartbeat = time.monotonic()
             while time.monotonic() < end:
                 now = time.monotonic()
-                if now - last_panel_open >= 10:
-                    # Open the review panel even when the active chat has
-                    # approval cards; other scheduled tasks may be waiting.
+                row_count = review_rows(page).count()
+                selected_review_row = None
+                if row_count:
+                    # Muse renders one panel approval at a time, even with
+                    # multiple review-needed task accordion entries. Traverse
+                    # them explicitly instead of staying on the first.
+                    index = review_cursor % row_count
+                    _, row_open = open_review_row(page, index)
+                    review_cursor = (index + 1) % row_count
+                    if row_open:
+                        selected_review_row = index
+                        visited_review_rows.add(index)
+                elif now - last_panel_open >= 10:
                     open_review_panel(page)
                     expand_pending_preview(page)
                     last_panel_open = now
@@ -417,6 +465,11 @@ def main():
                     max_attempts=config.get("max_attempts_per_card", 3),
                     retry_delay_seconds=config.get("retry_delay_seconds", 6),
                     confirmation_timeout_ms=2200,
+                    panel_only=selected_review_row is not None,
+                    identity_prefix=(
+                        f"review-row:{selected_review_row}:"
+                        if selected_review_row is not None else ""
+                    ),
                 )
                 totals[0] += scanned
                 totals[1] += clicked
@@ -425,7 +478,11 @@ def main():
                     print("MUSE_WATCHER=LIMIT_REACHED", flush=True)
                     break
                 page.wait_for_timeout(1000)
-            print(f"MUSE_WATCHER=COMPLETE observed={totals[0]} clicked={totals[1]} unrecognized={totals[2]}", flush=True)
+            print(
+                f"MUSE_WATCHER=COMPLETE observed={totals[0]} clicked={totals[1]} "
+                f"unrecognized={totals[2]} review_rows_visited={len(visited_review_rows)}",
+                flush=True,
+            )
             return 0
         finally:
             browser.close()

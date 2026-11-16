@@ -1,0 +1,43 @@
+name: Muse review panel diagnostics
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/muse-ui-diagnostic.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install Chromium
+        run: |
+          python -m pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Inspect Muse UI without approving anything
+        env:
+          PYTHONUNBUFFERED: '1'
+          MUSE_AUTH_B64: ${{ secrets.MUSE_AUTH_B64 }}
+          MUSE_AUTH_B64_01: ${{ secrets.MUSE_AUTH_B64_01 }}
+          MUSE_AUTH_B64_02: ${{ secrets.MUSE_AUTH_B64_02 }}
+          MUSE_AUTH_B64_03: ${{ secrets.MUSE_AUTH_B64_03 }}
+          MUSE_AUTH_B64_04: ${{ secrets.MUSE_AUTH_B64_04 }}
+          MUSE_AUTH_B64_05: ${{ secrets.MUSE_AUTH_B64_05 }}
+          MUSE_AUTH_B64_06: ${{ secrets.MUSE_AUTH_B64_06 }}
+          MUSE_AUTH_B64_07: ${{ secrets.MUSE_AUTH_B64_07 }}
+          MUSE_AUTH_B64_08: ${{ secrets.MUSE_AUTH_B64_08 }}
+          MUSE_AUTH_B64_09: ${{ secrets.MUSE_AUTH_B64_09 }}
+          MUSE_AUTH_B64_10: ${{ secrets.MUSE_AUTH_B64_10 }}
+          MUSE_AUTH_B64_11: ${{ secrets.MUSE_AUTH_B64_11 }}
+          MUSE_AUTH_B64_12: ${{ secrets.MUSE_AUTH_B64_12 }}
+        run: python scripts/diagnose_muse_ui.py

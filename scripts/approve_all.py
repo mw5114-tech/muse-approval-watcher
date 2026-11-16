@@ -7,6 +7,7 @@ authorize uploads, external sharing and high-impact actions. Use with care.
 Do not log raw cards, user content, cookies, or URLs.
 """
 import argparse
+import hashlib
 import json
 import re
 import time
@@ -175,40 +176,158 @@ def choose_allow(page, scope, fallback, prefer_always):
     return "once"
 
 
-def scan_once(page, mode, seen, prefer_always, max_clicks):
+def card_fingerprint(scope):
+    """In-memory only. Do not log request text or its hash."""
+    try:
+        text = scope.inner_text(timeout=700)
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    except Error:
+        return None
+
+
+def wait_card_gone(page, scope, timeout_ms=2200):
+    """Observe the original element, not a .nth() locator that may reindex.
+
+    A card disappearing is a UI acknowledgement, NOT proof that an external
+    tool call or other side effect succeeded.
+    """
+    handle = scope.element_handle(timeout=1000)
+    if not handle:
+        return False
+    try:
+        page.wait_for_function(
+            """el => !el.isConnected || el.hidden ||
+              el.getClientRects().length === 0 ||
+              getComputedStyle(el).visibility === 'hidden'""",
+            arg=handle,
+            timeout=timeout_ms,
+        )
+        return True
+    except (TimeoutError, Error):
+        return False
+
+
+def scan_once(page, mode, seen, prefer_always, max_clicks, *,
+              retry_state=None, max_attempts=1,
+              retry_delay_seconds=6.0, confirmation_timeout_ms=2200):
+    """Process the queue by re-fetching DOM after EACH click.
+
+    With retry_state set, re-click only the SAME still-visible, unchanged
+    approval surface. Each card is attempted at most max_attempts times.
+    A retry is never taken as evidence that the prior request failed; it is
+    therefore bounded and logged as UI-unconfirmed.
+    """
     scanned = clicked = blocked = 0
-    for scope in approval_items(page):
-        if clicked >= max_clicks:
+    inspected_this_pass = set()
+    if retry_state is None:
+        retry_state = {}
+        max_attempts = 1
+
+    while scanned < MAX_ITEMS_PER_PASS and clicked < max_clicks:
+        selected = None
+        # Fresh list on every iteration: Playwright nth() locators shift when
+        # a preceding approval disappears after an action.
+        for scope in approval_items(page):
+            key = stable_id(scope)
+            if key is None or key in seen or key in inspected_this_pass:
+                continue
+            record = retry_state.get(key)
+            if record and time.monotonic() < record["next_retry_at"]:
+                continue
+            selected = (scope, key, record)
             break
-        key = stable_id(scope)
-        if key is None or key in seen:
-            continue
+
+        if selected is None:
+            break
+        scope, key, record = selected
+        inspected_this_pass.add(key)
         scanned += 1
-        allow = control_pair(scope)
-        if allow is None:
-            blocked += 1
+
+        if record and record["fingerprint"] != card_fingerprint(scope):
             seen.add(key)
-            print("MUSE_APPROVAL=UNRECOGNIZED", flush=True)
+            retry_state.pop(key, None)
+            blocked += 1
+            print("MUSE_APPROVAL=CHANGED_REVIEW_NEEDED", flush=True)
             continue
+
+        allow = control_pair(scope)
+        if allow is None or not visible(scope):
+            # It may be transitioning after a previous click. Avoid a blind
+            # repeat on an ambiguous or disabled approval surface.
+            seen.add(key)
+            retry_state.pop(key, None)
+            blocked += 1
+            print("MUSE_APPROVAL=UNRECOGNIZED_OR_TRANSITIONING", flush=True)
+            continue
+        try:
+            if not allow.is_enabled(timeout=700):
+                seen.add(key)
+                retry_state.pop(key, None)
+                blocked += 1
+                print("MUSE_APPROVAL=DISABLED_REVIEW_NEEDED", flush=True)
+                continue
+        except Error:
+            seen.add(key)
+            retry_state.pop(key, None)
+            blocked += 1
+            continue
+
         if mode == "observe":
             seen.add(key)
             print("MUSE_APPROVAL=DETECTED", flush=True)
             continue
-        seen.add(key)   # Never double-click the same DOM approval within a run.
+
+        if record is None:
+            record = {
+                "attempts": 0,
+                "next_retry_at": 0.0,
+                "fingerprint": card_fingerprint(scope),
+            }
+            retry_state[key] = record
+
+        record["attempts"] += 1
         try:
             kind = choose_allow(page, scope, allow, prefer_always)
             clicked += 1
-            # Muse reacts asynchronously. Wait briefly for the approval card
-            # to disappear before classifying this as UI-confirmed.
-            # It is still NOT proof the requested external action succeeded.
-            try:
-                scope.wait_for(state="hidden", timeout=1700)
-                result = "DISMISSED"
-            except (TimeoutError, Error):
-                result = "UNCONFIRMED"
-            print(f"MUSE_APPROVAL=CLICKED kind={kind} ui={result}", flush=True)
+            dismissed = wait_card_gone(page, scope, timeout_ms=confirmation_timeout_ms)
+            if dismissed:
+                seen.add(key)
+                retry_state.pop(key, None)
+                print(
+                    f"MUSE_APPROVAL=CLICKED attempt={record['attempts']} "
+                    f"kind={kind} ui=DISMISSED",
+                    flush=True,
+                )
+                continue
+
+            if record["attempts"] >= max_attempts:
+                seen.add(key)
+                retry_state.pop(key, None)
+                print(
+                    f"MUSE_APPROVAL=RETRY_EXHAUSTED attempts={record['attempts']} "
+                    "ui=UNCONFIRMED",
+                    flush=True,
+                )
+            else:
+                record["next_retry_at"] = time.monotonic() + retry_delay_seconds
+                print(
+                    f"MUSE_APPROVAL=RETRY_SCHEDULED attempt={record['attempts']}"
+                    f"/{max_attempts} ui=UNCONFIRMED",
+                    flush=True,
+                )
         except Error as error:
-            print(f"MUSE_APPROVAL=CLICK_FAILED type={type(error).__name__}", flush=True)
+            # A Playwright click error can happen AFTER dispatching the event.
+            # Never immediately click again; let a later scan verify the DOM.
+            if record["attempts"] >= max_attempts:
+                seen.add(key)
+                retry_state.pop(key, None)
+            else:
+                record["next_retry_at"] = time.monotonic() + retry_delay_seconds
+            print(
+                f"MUSE_APPROVAL=CLICK_FAILED attempt={record['attempts']} "
+                f"type={type(error).__name__}",
+                flush=True,
+            )
     return scanned, clicked, blocked
 
 
@@ -219,6 +338,12 @@ def validate_config(config):
         raise ValueError("prefer_always must be boolean")
     if not isinstance(config.get("approve_all"), bool):
         raise ValueError("approve_all must be boolean")
+    attempts = config.get("max_attempts_per_card", 3)
+    if not isinstance(attempts, int) or isinstance(attempts, bool) or not 1 <= attempts <= 3:
+        raise ValueError("max_attempts_per_card must be 1..3")
+    retry_delay = config.get("retry_delay_seconds", 6)
+    if not isinstance(retry_delay, (int, float)) or isinstance(retry_delay, bool) or not 4 <= retry_delay <= 30:
+        raise ValueError("retry_delay_seconds must be 4..30")
     count = config.get("max_approvals_per_run")
     if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 100:
         raise ValueError("max_approvals_per_run must be 1..100")
@@ -260,6 +385,7 @@ def main():
                 return 2
             end = time.monotonic() + config["scan_seconds"]
             seen = set()
+            retry_state = {}
             totals = [0, 0, 0]
             last_panel_open = 0
             last_heartbeat = time.monotonic()
@@ -284,6 +410,10 @@ def main():
                 scanned, clicked, blocked = scan_once(
                     page, mode, seen, config["prefer_always"],
                     config["max_approvals_per_run"] - totals[1],
+                    retry_state=retry_state,
+                    max_attempts=config.get("max_attempts_per_card", 3),
+                    retry_delay_seconds=config.get("retry_delay_seconds", 6),
+                    confirmation_timeout_ms=2200,
                 )
                 totals[0] += scanned
                 totals[1] += clicked

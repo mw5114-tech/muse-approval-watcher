@@ -6,7 +6,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from approve_all import scan_once, validate_config
+from approve_all import scan_once, validate_config, open_review_row, review_rows
 
 
 CONFIG = {
@@ -293,6 +293,64 @@ class AllApprovalsTests(unittest.TestCase):
                 )
                 self.assertEqual((one[1], two[1]), (1, 0))
                 self.assertEqual(page.locator("#retry").get_attribute("data-count"), "1")
+            finally:
+                browser.close()
+
+    def test_nine_like_review_rows_are_traversed_one_at_a_time(self):
+        # Exactly one panel approval is visible at a time. Rows can have
+        # identical text, just as the live UI diagnostics suggested.
+        html = """
+          <div data-testid="hatch-status-panel-sliding-surface">
+            <button class="review" aria-expanded="false" onclick="show(0)">검토 필요</button>
+            <button class="review" aria-expanded="false" onclick="show(1)">검토 필요</button>
+            <button class="review" aria-expanded="false" onclick="show(2)">검토 필요</button>
+            <article data-testid="hatch-inline-approval-card"
+              data-hatch-approval-surface="panel" class="card" style="display:none">
+              <p>동일한 승인 문구</p>
+              <button class="ok" onclick="this.closest('article').remove()">허용</button>
+              <button>거부</button>
+            </article>
+            <article data-testid="hatch-inline-approval-card"
+              data-hatch-approval-surface="panel" class="card" style="display:none">
+              <p>동일한 승인 문구</p>
+              <button class="ok" onclick="this.closest('article').remove()">허용</button>
+              <button>거부</button>
+            </article>
+            <article data-testid="hatch-inline-approval-card"
+              data-hatch-approval-surface="panel" class="card" style="display:none">
+              <p>동일한 승인 문구</p>
+              <button class="ok" onclick="this.closest('article').remove()">허용</button>
+              <button>거부</button>
+            </article>
+          </div>
+          <script>
+            function show(n) {
+              const buttons = [...document.querySelectorAll('.review')];
+              const cards = [...document.querySelectorAll('.card')];
+              buttons.forEach((b,i) => b.setAttribute('aria-expanded',i===n?'true':'false'));
+              cards.forEach((card,i) => card.style.display = i===n?'block':'none');
+            }
+          </script>"""
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                page.set_content(html)
+                seen, retries = set(), {}
+                self.assertEqual(review_rows(page).count(), 3)
+                for i in range(3):
+                    _, opened = open_review_row(page, i)
+                    self.assertTrue(opened)
+                    _, clicked, _ = scan_once(
+                        page, "apply", seen, False, 10,
+                        retry_state=retries, max_attempts=3,
+                        retry_delay_seconds=0,
+                        confirmation_timeout_ms=140,
+                        panel_only=True,
+                        identity_prefix=f"review-row:{i}:",
+                    )
+                    self.assertEqual(clicked, 1)
+                self.assertEqual(page.locator(".ok").count(), 0)
             finally:
                 browser.close()
 

@@ -27,7 +27,7 @@ def age_minutes(item, now):
     return (now - parse_iso(item["created_at"])).total_seconds() / 60
 
 
-def assess(runs, now, recovery_age=12, warning_age=20, critical_age=90, stuck_age=25):
+def assess(runs, now, recovery_age=22, warning_age=30, critical_age=90, stuck_age=25):
     """Pure decision logic for unit tests. Returns (severity, dispatch, reason).
 
     Recency is measured across schedule AND workflow_dispatch runs, because a
@@ -107,8 +107,8 @@ def append_summary(level, detail, recovery):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--recovery-age", type=int, default=12)
-    parser.add_argument("--warning-age", type=int, default=20)
+    parser.add_argument("--recovery-age", type=int, default=22)
+    parser.add_argument("--warning-age", type=int, default=30)
     parser.add_argument("--critical-age", type=int, default=90)
     args = parser.parse_args()
     repo = os.environ.get("GITHUB_REPOSITORY", "").strip()

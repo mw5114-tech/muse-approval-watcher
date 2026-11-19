@@ -2,7 +2,7 @@ name: Muse schedule health watchdog
 
 on:
   schedule:
-    - cron: '1/5 * * * *'
+    - cron: '11/15 * * * *'
   workflow_dispatch:
   push:
     branches: [main]
@@ -30,4 +30,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_EVENT_REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: python3 scripts/check_health.py --recovery-age 12 --warning-age 20 --critical-age 90
+        run: python3 scripts/check_health.py --recovery-age 22 --warning-age 30 --critical-age 90

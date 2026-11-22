@@ -58,6 +58,32 @@ class WatchdogTests(unittest.TestCase):
             assess([run(1, "completed", "failure")], NOW)[:2], ("warning", False)
         )
 
+    def test_repeated_failures_pause_watchdog_recovery(self):
+        # Three consecutive failed jobs should not dispatch a fourth
+        # near-identical job merely because GitHub cron is delayed.
+        runs = [
+            run(3, "completed", "failure"),
+            run(15, "completed", "failure", "workflow_dispatch"),
+            run(35, "completed", "failure"),
+        ]
+        severity, dispatch, reason = assess(runs, NOW)
+        self.assertEqual((severity, dispatch), ("warning", False))
+        self.assertIn("recovery_circuit_open", reason)
+
+    def test_recovery_resumes_after_cooldown_and_success_resets_breaker(self):
+        failures = [
+            run(46, "completed", "failure"),
+            run(60, "completed", "failure"),
+            run(80, "completed", "failure"),
+        ]
+        self.assertEqual(assess(failures, NOW)[:2], ("warning", True))
+        with_success = [run(1, event="workflow_dispatch")] + [
+            run(3, "completed", "failure"),
+            run(12, "completed", "failure"),
+            run(25, "completed", "failure"),
+        ]
+        self.assertEqual(assess(with_success, NOW)[:2], ("healthy", False))
+
     def test_critical_90_minute_outage_still_alerts(self):
         self.assertEqual(assess([run(91)], NOW)[:2], ("critical", True))
 

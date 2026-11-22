@@ -250,6 +250,29 @@ def state_expiry_probe(state):
     )
 
 
+
+def auth_ui_category_probe(page):
+    """Classify generic site screens without outputting user or page text."""
+    patterns = {
+        "explicit_sign_in": r"(log\s*in|sign\s*in|로그인|계정\s*만들기|계정에\s*로그인)",
+        "sign_in_onboarding": r"(get\s*started|welcome\s*to\s*muse|start\s*chatting|시작하기)",
+        "challenge": r"(verify\s*(you.?re|you\s+are)\s*human|captcha|security\s*check|cloudflare|보안\s*확인)",
+        "regional_gate": r"(waitlist|not\s*available\s*in\s*your\s*(country|region)|대기\s*명단|지원하지\s*않는\s*지역)",
+        "site_error": r"(something\s*went\s*wrong|try\s*again\s*later|temporary\s*unavailable|service\s*unavailable|문제가\s*발생)",
+    }
+    try:
+        body = page.locator("body").inner_text(timeout=1500)
+        categories = [
+            name for name, pattern in patterns.items()
+            if re.search(pattern, body, re.I)
+        ]
+        if not categories:
+            categories = ["unclassified"]
+        print("MUSE_AUTH_SCREEN categories=" + ",".join(categories), flush=True)
+    except Error:
+        print("MUSE_AUTH_SCREEN categories=unreadable", flush=True)
+
+
 def main():
     state = load_state()
     state_expiry_probe(state)
@@ -268,6 +291,7 @@ def main():
                 page.wait_for_timeout(6000)
                 auth_probe(page, "17s", response)
             ui_structure_probe(page, "17s")
+            auth_ui_category_probe(page)
             stats(page, "landing")
             if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
                 try:

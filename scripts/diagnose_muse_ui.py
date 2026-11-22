@@ -5,6 +5,7 @@ Does NOT click any approval action, save screenshots, or log user content.
 """
 import hashlib
 import re
+from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright, Error
 from check_muse_session import auth_status, load_state
 
@@ -182,6 +183,29 @@ def inspect_review_button_structure(page):
     print("MUSE_UI_DIAG review_button_structure=" + ",".join(details), flush=True)
 
 
+
+def auth_probe(page, stage, response=None):
+    """Only fixed classifications and counts; never print URLs or page content."""
+    host = urlsplit(page.url).hostname or ""
+    host_class = "muse" if host == "muse.ai" else (
+        "muse_subdomain" if host.endswith(".muse.ai") else "other")
+    headings = sum(page.get_by_role("heading", name=title, exact=True).count()
+                   for title in ("로그인 또는 계정 만들기", "Log in or sign up", "Sign in"))
+    signals = {
+        "stage": stage,
+        "status": auth_status(page),
+        "host": host_class,
+        "document_http": response.status if response else "unknown",
+        "avatar": page.locator('[data-hatch-avatar-interaction="true"]').count(),
+        "threads": page.locator('[data-testid="hatch-thread-row"]').count(),
+        "login_headings": headings,
+        "approval_cards": page.locator(CARD).count(),
+    }
+    print("MUSE_AUTH_PROBE " +
+          " ".join(f"{key}={value}" for key, value in signals.items()),
+          flush=True)
+
+
 def main():
     state = load_state()
     with sync_playwright() as p:
@@ -189,8 +213,15 @@ def main():
         try:
             context = browser.new_context(storage_state=state, locale="ko-KR")
             page = context.new_page()
-            page.goto("https://muse.ai/", wait_until="domcontentloaded", timeout=40000)
+            response = page.goto("https://muse.ai/", wait_until="domcontentloaded", timeout=40000)
             page.wait_for_timeout(5000)
+            auth_probe(page, "5s", response)
+            if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
+                page.wait_for_timeout(6000)
+                auth_probe(page, "11s", response)
+            if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
+                page.wait_for_timeout(6000)
+                auth_probe(page, "17s", response)
             stats(page, "landing")
             if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
                 return 2

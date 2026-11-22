@@ -68,7 +68,7 @@ def auth_status(page):
     # misclassify this as signed-in: we only test it after app UI signals.
     try:
         screen_text = page.locator("body").inner_text(timeout=700)
-        if re.search(r"(?<![a-z])(?:sign\\s*in|log\\s*in|로그인)(?![a-z])",
+        if re.search(r"(?<![a-z])(?:sign\s*in|log\s*in|로그인)(?![a-z])",
                      screen_text, re.I):
             return "LOGIN_REQUIRED"
     except Error:

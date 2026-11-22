@@ -15,6 +15,7 @@ import sys
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
+from check_muse_session import auth_status
 
 SINGLE_SECRET = "MUSE_AUTH_B64"
 PART_PREFIX = "MUSE_AUTH_B64_"
@@ -119,6 +120,12 @@ def main():
             input("Muse 로그인 후 채팅 화면이 보이면 PowerShell에서 Enter를 누르세요: ")
             if (urlsplit(page.url).hostname or "").lower() != "muse.ai":
                 print("Muse 페이지에서 로그인을 완료해야 합니다.", file=sys.stderr)
+                return 2
+            # A homepage URL alone does NOT prove an authenticated session.
+            # Prevent accidentally replacing a working Actions secret with
+            # a signed-out, checkpoint or partially loaded browser snapshot.
+            if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
+                print("Muse 로그인된 채팅 화면이 확인되지 않아 저장을 중단합니다.", file=sys.stderr)
                 return 2
             state = context.storage_state(indexed_db=True)
         finally:

@@ -397,6 +397,71 @@ def validate_config(config):
     return config
 
 
+
+def wait_for_authenticated_ui(page, *, checks=18, interval_ms=1000,
+                              status_fn=auth_status):
+    """Wait for a real signed-in UI, not just DOMContentLoaded.
+
+    Fixed-interval polling avoids falsely declaring a valid but slowly
+    hydrated page logged out after an arbitrary short sleep.
+    """
+    if checks < 1:
+        raise ValueError("checks must be positive")
+    status = "INCONCLUSIVE"
+    for index in range(checks):
+        status = status_fn(page)
+        if status == "AUTHENTICATED_UI_PRESENT":
+            return status
+        if index + 1 < checks:
+            page.wait_for_timeout(interval_ms)
+    return status
+
+
+def establish_authenticated_session(page, *, attempts=3,
+                                    checks_per_attempt=18,
+                                    interval_ms=1000):
+    """Retry rendering on the same stored session; never auto-login.
+
+    Logs only bounded status categories and the HTTP status code for the
+    root document. Do not emit redirected URLs, response bodies, or cookies.
+    """
+    statuses = []
+    for attempt in range(attempts):
+        http_status = "unknown"
+        try:
+            # Reload is useful for a transiently blank or unhydrated SPA.
+            response = (
+                page.goto("https://muse.ai/", wait_until="domcontentloaded",
+                          timeout=30000)
+                if attempt == 0
+                else page.reload(wait_until="domcontentloaded", timeout=30000)
+            )
+            if response is not None:
+                http_status = response.status
+            status = wait_for_authenticated_ui(
+                page, checks=checks_per_attempt, interval_ms=interval_ms,
+            )
+        except Error:
+            status = "NAVIGATION_ERROR"
+        statuses.append(status)
+        print(
+            f"MUSE_STARTUP_CHECK attempt={attempt + 1}/{attempts} "
+            f"status={status} document_http={http_status}", flush=True
+        )
+        if status == "AUTHENTICATED_UI_PRESENT":
+            return True
+        if attempt + 1 < attempts:
+            page.wait_for_timeout(2000 * (attempt + 1))
+    if statuses and all(s == "LOGIN_REQUIRED" for s in statuses):
+        failure = "LOGIN_REQUIRED"
+    elif statuses and all(s == "NAVIGATION_ERROR" for s in statuses):
+        failure = "NAVIGATION_FAILED"
+    else:
+        failure = "AUTH_UNVERIFIED_OR_UI_UNAVAILABLE"
+    print(f"MUSE_WATCHER=STARTUP_FAILED reason={failure}", flush=True)
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("observe", "apply"), default="observe")
@@ -411,21 +476,9 @@ def main():
         try:
             context = browser.new_context(storage_state=state, locale="ko-KR")
             page = context.new_page()
-            # A transient navigation failure should not permanently skip a run.
-            for attempt in range(2):
-                try:
-                    page.goto("https://muse.ai/", wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(3500)
-                    if auth_status(page) == "AUTHENTICATED_UI_PRESENT":
-                        break
-                except Error:
-                    if attempt:
-                        print("MUSE_WATCHER=NAVIGATION_FAILED", flush=True)
-                        return 2
-                if attempt == 0:
-                    page.wait_for_timeout(2000)
-            else:
-                print("MUSE_WATCHER=AUTH_REQUIRED_OR_SITE_UNAVAILABLE", flush=True)
+            # Page readiness is independent of HTTP 200 / DOMContentLoaded.
+            # Never approve when the account UI remains unverified.
+            if not establish_authenticated_session(page):
                 return 2
             end = time.monotonic() + config["scan_seconds"]
             seen = set()

@@ -6,9 +6,10 @@ import gzip
 import hashlib
 import json
 import os
+import re
 from urllib.parse import urlsplit
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, Error
 
 def read_encoded_secret():
     single = os.environ.get("MUSE_AUTH_B64", "").strip()
@@ -62,6 +63,16 @@ def auth_status(page):
     if any(page.get_by_role("heading", name=title, exact=True).count()
            for title in logged_out_titles):
         return "LOGIN_REQUIRED"
+    # Muse occasionally changes its login layout: the top-level sign-in
+    # prompt can be ordinary text or a button instead of an H1/H2. Never
+    # misclassify this as signed-in: we only test it after app UI signals.
+    try:
+        screen_text = page.locator("body").inner_text(timeout=700)
+        if re.search(r"(?<![a-z])(?:sign\\s*in|log\\s*in|로그인)(?![a-z])",
+                     screen_text, re.I):
+            return "LOGIN_REQUIRED"
+    except Error:
+        pass
     return "INCONCLUSIVE"
 
 def main():

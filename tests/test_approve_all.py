@@ -1,12 +1,14 @@
 """Offline synthetic DOM tests; no real Muse approvals are sent."""
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from approve_all import scan_once, validate_config, open_review_row, review_rows
+from approve_all import (scan_once, validate_config, open_review_row, review_rows,
+                         wait_for_authenticated_ui, establish_authenticated_session)
 
 
 CONFIG = {
@@ -16,6 +18,58 @@ CONFIG = {
 
 
 class AllApprovalsTests(unittest.TestCase):
+    def test_auth_poll_waits_for_hydrated_muse_ui(self):
+        class FakePage:
+            polls = 0
+            def wait_for_timeout(self, milliseconds):
+                self.polls += 1
+        page = FakePage()
+        states = iter(["INCONCLUSIVE", "INCONCLUSIVE", "AUTHENTICATED_UI_PRESENT"])
+        result = wait_for_authenticated_ui(
+            page, checks=4, interval_ms=1, status_fn=lambda _: next(states)
+        )
+        self.assertEqual(result, "AUTHENTICATED_UI_PRESENT")
+        self.assertEqual(page.polls, 2)
+
+    def test_auth_startup_reloads_before_failure_without_approving(self):
+        class FakeResponse:
+            status = 200
+        class FakePage:
+            navigations = 0
+            reloads = 0
+            def goto(self, *args, **kwargs):
+                self.navigations += 1
+                return FakeResponse()
+            def reload(self, *args, **kwargs):
+                self.reloads += 1
+                return FakeResponse()
+            def wait_for_timeout(self, milliseconds):
+                pass
+        page = FakePage()
+        with patch("approve_all.wait_for_authenticated_ui",
+                   side_effect=["INCONCLUSIVE", "AUTHENTICATED_UI_PRESENT"]):
+            result = establish_authenticated_session(page, attempts=3)
+        self.assertTrue(result)
+        self.assertEqual((page.navigations, page.reloads), (1, 1))
+
+    def test_auth_fail_closed_after_bounded_retries(self):
+        class FakeResponse:
+            status = 200
+        class FakePage:
+            reloads = 0
+            def goto(self, *args, **kwargs):
+                return FakeResponse()
+            def reload(self, *args, **kwargs):
+                self.reloads += 1
+                return FakeResponse()
+            def wait_for_timeout(self, milliseconds):
+                pass
+        page = FakePage()
+        with patch("approve_all.wait_for_authenticated_ui", return_value="INCONCLUSIVE"):
+            result = establish_authenticated_session(page, attempts=3)
+        self.assertFalse(result)
+        self.assertEqual(page.reloads, 2)
+
     def test_configuration_requires_explicit_bool(self):
         self.assertIs(validate_config(CONFIG), CONFIG)
         for config in ({**CONFIG, "approve_all": "true"},

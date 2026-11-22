@@ -57,6 +57,24 @@ def assess(runs, now, recovery_age=22, warning_age=30, critical_age=90, stuck_ag
     if latest.get("conclusion") != "success":
         if age < 2:
             return "warning", False, "failed_just_now_retry_cooldown"
+        # When the site or session is consistently failing, firing another
+        # Playwright run every watchdog tick just creates failure spam and
+        # pending concurrency replacements. Preserve scheduled checks, but
+        # pause EXTRA dispatches until a bounded cooldown expires.
+        consecutive_failures = 0
+        for item in candidates:
+            if age_minutes(item, now) > 90:
+                break
+            if item.get("status") == "completed" and item.get("conclusion") == "success":
+                break
+            if item.get("status") == "completed" and item.get("conclusion") != "success":
+                consecutive_failures += 1
+        if consecutive_failures >= 3 and age < 45:
+            return (
+                "warning", False,
+                f"recovery_circuit_open failures={consecutive_failures} "
+                f"age_minutes={age:.1f}",
+            )
         level = "critical" if age >= critical_age else "warning"
         return level, True, f"last_run_failed age_minutes={age:.1f}"
     if age < recovery_age:

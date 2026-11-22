@@ -9,6 +9,7 @@ from playwright.sync_api import sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from approve_all import (scan_once, validate_config, open_review_row, review_rows,
                          wait_for_authenticated_ui, establish_authenticated_session)
+from check_muse_session import auth_status
 
 
 CONFIG = {
@@ -18,6 +19,24 @@ CONFIG = {
 
 
 class AllApprovalsTests(unittest.TestCase):
+    def test_changed_muse_login_screen_is_detected(self):
+        # Offline network mock; does not contact Muse or touch session tokens.
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                page.route("https://muse.ai/", lambda route: route.fulfill(
+                    status=200, content_type="text/html",
+                    body="<html><body><div>Sign in to Muse</div><button>Sign in</button></body></html>"
+                ))
+                page.goto("https://muse.ai/")
+                self.assertEqual(auth_status(page), "LOGIN_REQUIRED")
+                page.set_content("""<div data-hatch-avatar-interaction="true"></div>
+                    <button>Sign in to your mailbox</button>""")
+                self.assertEqual(auth_status(page), "AUTHENTICATED_UI_PRESENT")
+            finally:
+                browser.close()
+
     def test_auth_poll_waits_for_hydrated_muse_ui(self):
         class FakePage:
             polls = 0

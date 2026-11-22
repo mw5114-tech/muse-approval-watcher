@@ -206,8 +206,53 @@ def auth_probe(page, stage, response=None):
           flush=True)
 
 
+
+def ui_structure_probe(page, stage):
+    """Counts only; no raw page data, script strings, URLs, or page errors."""
+    snapshot = page.evaluate("""() => ({
+      ready: document.readyState,
+      body_len: document.body?.innerText?.length || 0,
+      body_elements: document.body?.querySelectorAll('*').length || 0,
+      buttons: document.querySelectorAll('button').length,
+      links: document.querySelectorAll('a').length,
+      inputs: document.querySelectorAll('input').length,
+      scripts: document.querySelectorAll('script').length,
+      app_roots: document.querySelectorAll('#root, #__next, [data-reactroot]').length
+    })""")
+    frames = []
+    for f in page.frames[:12]:
+        host = urlsplit(f.url).hostname or ""
+        category = ("muse" if host == "muse.ai" or host.endswith(".muse.ai")
+                    else "blank" if f.url == "about:blank" else "other")
+        frames.append(category)
+    data = " ".join(f"{key}={value}" for key, value in snapshot.items())
+    print(
+        f"MUSE_STRUCTURE stage={stage} {data} "
+        f"frames_total={len(page.frames)} frame_hosts={','.join(frames)}",
+        flush=True,
+    )
+
+
+def state_expiry_probe(state):
+    """Classify secret age without printing secrets or individual cookie data."""
+    import time
+    cookies = state.get("cookies", [])
+    now = time.time()
+    muse_cookies = [c for c in cookies if c.get("domain", "").lstrip(".").endswith("muse.ai")]
+    expired = sum(isinstance(c.get("expires"), (int, float))
+                  and 0 < c["expires"] < now for c in muse_cookies)
+    session = sum(c.get("expires") == -1 for c in muse_cookies)
+    print(
+        "MUSE_STATE_PROBE muse_cookies_total=" + str(len(muse_cookies)) +
+        " expired=" + str(expired) + " session=" + str(session) +
+        " origins_total=" + str(len(state.get("origins", []))),
+        flush=True,
+    )
+
+
 def main():
     state = load_state()
+    state_expiry_probe(state)
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
@@ -222,9 +267,18 @@ def main():
             if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
                 page.wait_for_timeout(6000)
                 auth_probe(page, "17s", response)
+            ui_structure_probe(page, "17s")
             stats(page, "landing")
             if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
-                return 2
+                try:
+                    response = page.reload(wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(7000)
+                    auth_probe(page, "reloaded", response)
+                    ui_structure_probe(page, "reloaded")
+                except Error:
+                    print("MUSE_AUTH_PROBE reload_failed=1", flush=True)
+                if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
+                    return 2
             result = click_review_navigation(page)
             print("MUSE_UI_DIAG navigation=" + result, flush=True)
             page.wait_for_timeout(1600)

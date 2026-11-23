@@ -58,6 +58,16 @@ class WatchdogTests(unittest.TestCase):
             assess([run(1, "completed", "failure")], NOW)[:2], ("warning", False)
         )
 
+    def test_two_consecutive_failures_suppress_futile_extra_dispatch(self):
+        # Scheduled checks continue. Only Watchdog's extra dispatches pause.
+        runs = [
+            run(4, "completed", "failure"),
+            run(50, "completed", "failure"),
+        ]
+        level, dispatch, reason = assess(runs, NOW)
+        self.assertEqual((level, dispatch), ("warning", False))
+        self.assertIn("recovery_circuit_open", reason)
+
     def test_repeated_failures_pause_watchdog_recovery(self):
         # Three consecutive failed jobs should not dispatch a fourth
         # near-identical job merely because GitHub cron is delayed.

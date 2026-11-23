@@ -45,6 +45,14 @@ jobs:
       - name: Check pending Muse approvals
         env:
           PYTHONUNBUFFERED: '1'
+          # Disabled by setting the repository variable to "false".
+          # Defaults to guarded, one-click remembered-account recovery.
+          MUSE_ONE_CLICK_LOGIN_ENABLED: ${{ vars.MUSE_ONE_CLICK_LOGIN_ENABLED }}
+          # Optional safety pin: only choose an account whose displayed email
+          # matches this Secret. Never log or commit the email.
+          MUSE_EXPECTED_LOGIN_EMAIL: ${{ secrets.MUSE_EXPECTED_LOGIN_EMAIL }}
+          # Only needed for an account chooser on a non-Muse official auth host.
+          MUSE_LOGIN_ALLOWED_HOSTS: ${{ vars.MUSE_LOGIN_ALLOWED_HOSTS }}
           MUSE_AUTH_B64: ${{ secrets.MUSE_AUTH_B64 }}
           MUSE_AUTH_B64_01: ${{ secrets.MUSE_AUTH_B64_01 }}
           MUSE_AUTH_B64_02: ${{ secrets.MUSE_AUTH_B64_02 }}

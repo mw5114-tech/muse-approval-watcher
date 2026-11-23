@@ -73,7 +73,7 @@ class OneClickLoginTests(unittest.TestCase):
                 ))
                 self.assertEqual(
                     try_one_click_reauth(page, expected_email="different@example.com"),
-                    "NOT_PRESENT",
+                    "CHOOSER_UNVERIFIED",
                 )
                 self.assertEqual(page.locator("button.login").count(), 1)
             finally:
@@ -86,7 +86,7 @@ class OneClickLoginTests(unittest.TestCase):
                 page = browser.new_page()
                 visit(page, chooser(extra="<span>second@example.com</span>"))
                 self.assertIsNone(confirmed_account_chooser(page.main_frame))
-                self.assertEqual(try_one_click_reauth(page), "NOT_PRESENT")
+                self.assertEqual(try_one_click_reauth(page), "CHOOSER_UNVERIFIED")
                 self.assertEqual(page.locator("button.login").count(), 1)
             finally:
                 browser.close()
@@ -97,7 +97,7 @@ class OneClickLoginTests(unittest.TestCase):
             try:
                 page = browser.new_page()
                 visit(page, chooser(login_count=2))
-                self.assertEqual(try_one_click_reauth(page), "NOT_PRESENT")
+                self.assertEqual(try_one_click_reauth(page), "CHOOSER_UNVERIFIED")
                 self.assertEqual(page.locator("button.login").count(), 2)
             finally:
                 browser.close()
@@ -108,8 +108,8 @@ class OneClickLoginTests(unittest.TestCase):
             try:
                 page = browser.new_page()
                 visit(page, chooser(extra='<input type="password"/>'))
-                self.assertEqual(try_one_click_reauth(page), "NOT_PRESENT")
-                self.assertIsNotNone(page.locator('input[type="password"]'))
+                self.assertEqual(try_one_click_reauth(page), "CHOOSER_UNVERIFIED")
+                self.assertEqual(page.locator('input[type="password"]').count(), 1)
             finally:
                 browser.close()
 
@@ -146,13 +146,14 @@ class OneClickLoginTests(unittest.TestCase):
                 final_html = chooser()
                 # Build a safe landing page that reveals the chooser after
                 # the explicit Muse login-entry button is clicked.
-                import json
-                entry = (
-                    "<html><body>뮤즈 로그인"
-                    f"<button onclick='document.body.innerHTML={json.dumps(final_html)}'>"
-                    "로그인</button></body></html>"
-                )
-                visit(page, entry)
+                visit(page, (
+                    '<html><body>뮤즈 로그인'
+                    '<button id="entry">로그인</button></body></html>'
+                ))
+                page.evaluate("""html => {
+                    document.querySelector('#entry').addEventListener('click',
+                        () => { document.body.innerHTML = html; });
+                }""", final_html)
                 self.assertEqual(try_one_click_reauth(page), "AUTHENTICATED")
             finally:
                 browser.close()

@@ -156,7 +156,9 @@ def try_one_click_reauth(page, *, expected_email=None, extra_hosts=None):
         entry = page.get_by_role("button", name=LOGIN)
         if (not re.search(r"(?:로그인|Sign\s*in|Log\s*in)", body, re.I)
                 or entry.count() != 1 or not entry.first.is_visible()
-                or page.locator('input[type="password"]').count()):
+                # A homepage sign-in entry should not contain credential
+                # fields. Never submit an OTP/email/password form here.
+                or page.locator("input").count()):
             return "NOT_PRESENT"
         entry.first.click(timeout=3500)
         page.wait_for_timeout(1500)

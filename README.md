@@ -76,3 +76,12 @@ One authorized live verification [run 43785503725](https://github.com/mw5114-tec
 **Manual reauthentication:** On the trusted Windows computer that originally exported Muse authentication, run `scripts/export_muse_session.py` in PowerShell after installing repository dependencies and Playwright Chromium. Sign in through the dedicated visible browser window, verify the chat UI appears, and follow prompts to replace GitHub Actions Secret `MUSE_AUTH_B64` (or the split `MUSE_AUTH_B64_XX` secrets). Never copy session values into issues, commits, chats, or logs. Verify the next watcher reports `status=AUTHENTICATED_UI_PRESENT` before expecting approvals to resume.
 
 **Limit:** An expired/revoked session, additional login checkpoint, region restriction, or Muse UI/server change cannot safely be cured with extra button clicks. The watcher intentionally fails closed when the signed-in UI is not verified.
+
+### 2026-11-23 follow-up: persistent sign-in errors
+
+- The [09:09 KST scheduled run](https://github.com/mw5114-tech/muse-approval-watcher/actions/runs/45087065736) reached `muse.ai` (`document_http=200`) but printed `LOGIN_REQUIRED` three times, then failed closed. Earlier runs at approximately 07:35 and 08:25 KST showed the same classification. These are authentication errors, not Playwright browser-install or approval-click exceptions.
+- Startup now requires several consecutive `LOGIN_REQUIRED` observations before calling a page signed-out, and verifies on one further reload rather than doing all three lengthy retries when the signed-out UI persists. Transient `INCONCLUSIVE` states still get all bounded retries.
+- A failed startup writes an actionable, secret-free GitHub step summary that identifies the classification and points to renewal of the saved Muse session. It never silently treats the failed approval check as successful.
+- Watchdog temporarily stops extra recovery dispatches after **two** consecutive failed recent runs for up to **90 minutes**, because the main 15-minute schedule can be delayed significantly. Scheduled runs remain enabled, and successful runs reset this protective cooldown.
+- **Manual step remains necessary:** refresh the `MUSE_AUTH_B64` secret from a newly authenticated, trusted local browser session using `scripts/export_muse_session.py`. Code changes alone do not restore expired or revoked credentials. Do not paste secret values in GitHub issues, logs, or chat.
+

@@ -50,6 +50,56 @@ class AllApprovalsTests(unittest.TestCase):
         self.assertEqual(result, "AUTHENTICATED_UI_PRESENT")
         self.assertEqual(page.polls, 2)
 
+
+    def test_auth_login_prompt_waits_for_consistent_ui_then_returns(self):
+        class FakePage:
+            polls = 0
+            def wait_for_timeout(self, milliseconds):
+                self.polls += 1
+        page = FakePage()
+        states = iter(["LOGIN_REQUIRED"] * 10)
+        result = wait_for_authenticated_ui(
+            page, checks=18, interval_ms=1, status_fn=lambda _: next(states)
+        )
+        self.assertEqual(result, "LOGIN_REQUIRED")
+        self.assertEqual(page.polls, 4)
+
+    def test_transient_login_prompt_does_not_block_eventual_auth(self):
+        class FakePage:
+            polls = 0
+            def wait_for_timeout(self, milliseconds):
+                self.polls += 1
+        page = FakePage()
+        states = iter([
+            "LOGIN_REQUIRED", "LOGIN_REQUIRED", "INCONCLUSIVE",
+            "LOGIN_REQUIRED", "AUTHENTICATED_UI_PRESENT",
+        ])
+        self.assertEqual(wait_for_authenticated_ui(
+            page, checks=10, interval_ms=1,
+            status_fn=lambda _: next(states),
+        ), "AUTHENTICATED_UI_PRESENT")
+
+    def test_two_confirmed_login_pages_abort_futile_third_attempt(self):
+        class FakeResponse:
+            status = 200
+        class FakePage:
+            navigations = 0
+            reloads = 0
+            def goto(self, *args, **kwargs):
+                self.navigations += 1
+                return FakeResponse()
+            def reload(self, *args, **kwargs):
+                self.reloads += 1
+                return FakeResponse()
+            def wait_for_timeout(self, milliseconds):
+                pass
+        page = FakePage()
+        with patch("approve_all.wait_for_authenticated_ui",
+                   return_value="LOGIN_REQUIRED"):
+            result = establish_authenticated_session(page, attempts=3)
+        self.assertFalse(result)
+        self.assertEqual((page.navigations, page.reloads), (1, 1))
+
     def test_auth_startup_reloads_before_failure_without_approving(self):
         class FakeResponse:
             status = 200

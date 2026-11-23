@@ -17,6 +17,7 @@ from pathlib import Path
 from playwright.sync_api import Error, TimeoutError, sync_playwright
 
 from check_muse_session import auth_status, load_state
+from muse_one_click_reauth import try_one_click_reauth
 
 CARD = '[data-testid="hatch-inline-approval-card"]:not([data-hatch-background-approval-surface="true"])'
 BACKGROUND = '[data-testid="hatch-inline-approval-card"][data-hatch-background-approval-surface="true"]'
@@ -466,6 +467,13 @@ def establish_authenticated_session(page, *, attempts=3,
         if attempt + 1 < attempts:
             page.wait_for_timeout(2000 * (attempt + 1))
     if statuses and all(s == "LOGIN_REQUIRED" for s in statuses):
+        # Do not loop passwords or silently trust a sign-in button.
+        # One guarded click is permitted only on a unique remembered-Muse
+        # account chooser hosted by a trusted domain.
+        outcome = try_one_click_reauth(page)
+        print(f"MUSE_REAUTH result={outcome}", flush=True)
+        if outcome == "AUTHENTICATED":
+            return True
         failure = "LOGIN_REQUIRED"
     elif statuses and all(s == "NAVIGATION_ERROR" for s in statuses):
         failure = "NAVIGATION_FAILED"

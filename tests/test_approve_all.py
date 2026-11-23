@@ -94,11 +94,35 @@ class AllApprovalsTests(unittest.TestCase):
             def wait_for_timeout(self, milliseconds):
                 pass
         page = FakePage()
-        with patch("approve_all.wait_for_authenticated_ui",
-                   return_value="LOGIN_REQUIRED"):
+        with (
+            patch("approve_all.wait_for_authenticated_ui",
+                  return_value="LOGIN_REQUIRED"),
+            patch("approve_all.try_one_click_reauth",
+                  return_value="NOT_PRESENT") as reauth,
+        ):
             result = establish_authenticated_session(page, attempts=3)
+            reauth.assert_called_once()
         self.assertFalse(result)
         self.assertEqual((page.navigations, page.reloads), (1, 1))
+
+    def test_one_click_login_verified_after_confirmed_logout(self):
+        class FakeResponse:
+            status = 200
+        class FakePage:
+            def goto(self, *args, **kwargs):
+                return FakeResponse()
+            def reload(self, *args, **kwargs):
+                return FakeResponse()
+            def wait_for_timeout(self, milliseconds):
+                pass
+        with (
+            patch("approve_all.wait_for_authenticated_ui",
+                  return_value="LOGIN_REQUIRED"),
+            patch("approve_all.try_one_click_reauth",
+                  return_value="AUTHENTICATED") as reauth,
+        ):
+            self.assertTrue(establish_authenticated_session(FakePage()))
+            reauth.assert_called_once()
 
     def test_auth_startup_reloads_before_failure_without_approving(self):
         class FakeResponse:

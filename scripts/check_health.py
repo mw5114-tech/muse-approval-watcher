@@ -60,7 +60,7 @@ def assess(runs, now, recovery_age=22, warning_age=30, critical_age=90, stuck_ag
         # When the site or session is consistently failing, firing another
         # Playwright run every watchdog tick just creates failure spam and
         # pending concurrency replacements. Preserve scheduled checks, but
-        # pause EXTRA dispatches until a bounded cooldown expires.
+        # pause EXTRA dispatches until the critical-age cooldown expires.
         consecutive_failures = 0
         for item in candidates:
             if age_minutes(item, now) > 90:
@@ -69,7 +69,7 @@ def assess(runs, now, recovery_age=22, warning_age=30, critical_age=90, stuck_ag
                 break
             if item.get("status") == "completed" and item.get("conclusion") != "success":
                 consecutive_failures += 1
-        if consecutive_failures >= 3 and age < 45:
+        if consecutive_failures >= 3 and age < critical_age:
             return (
                 "warning", False,
                 f"recovery_circuit_open failures={consecutive_failures} "

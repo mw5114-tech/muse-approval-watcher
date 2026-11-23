@@ -303,6 +303,36 @@ def login_form_structure_probe(page, stage):
           flush=True)
 
 
+
+def login_frame_structure_probe(page, stage):
+    """Inspect other pages/frames structurally; never output user data."""
+    pages = page.context.pages[:8]
+    pieces = []
+    for pidx, page_item in enumerate(pages):
+        for fidx, frame in enumerate(page_item.frames[:16]):
+            try:
+                host = urlsplit(frame.url).hostname or ""
+                category = ("muse" if host == "muse.ai" else
+                    "muse_auth" if host == "auth.muse.ai" else
+                    "meta" if host == "meta.com" or host.endswith(".meta.com") else
+                    "facebook" if host == "facebook.com" or host.endswith(".facebook.com") else
+                    "instagram" if host == "instagram.com" or host.endswith(".instagram.com") else
+                    "blank" if frame.url == "about:blank" else "other")
+                emails = frame.locator('input[type="email"]').count()
+                passwords = frame.locator('input[type="password"]').count()
+                texts = frame.locator('input[type="text"]').count()
+                tels = frame.locator('input[type="tel"]').count()
+                buttons = frame.locator('button').count()
+                if category != "other" or emails or passwords or texts or tels:
+                    pieces.append(
+                        f"{pidx}-{fidx}:{category}:{emails}:{passwords}:{texts}:{tels}:{buttons}"
+                    )
+            except Error:
+                pieces.append(f"{pidx}-{fidx}:unavailable")
+    print(f"MUSE_LOGIN_FRAMES stage={stage} pages={len(pages)} " +
+          "structure=" + ",".join(pieces), flush=True)
+
+
 def inspect_login_entry(page):
     """At most open the site's own login entry; never submit credentials."""
     names = re.compile(r"^(?:Log in|Sign in|로그인|Log in or sign up)$", re.I)
@@ -317,6 +347,7 @@ def inspect_login_entry(page):
                 page.wait_for_timeout(2500)
                 print("MUSE_LOGIN_FORM entry_clicked=1 role=" + role, flush=True)
                 login_form_structure_probe(page, "after_entry")
+                login_frame_structure_probe(page, "after_entry")
                 return
             except Error:
                 continue
@@ -354,6 +385,7 @@ def main():
                     print("MUSE_AUTH_PROBE reload_failed=1", flush=True)
                 if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
                     login_form_structure_probe(page, "reloaded")
+                    login_frame_structure_probe(page, "before_entry")
                     inspect_login_entry(page)
                     return 2
             result = click_review_navigation(page)

@@ -36,6 +36,23 @@ def allowed_host(url, extra_hosts=""):
     return host in extras
 
 
+
+def displayed_account_emails(frame):
+    """Read visible account labels from separate DOM text nodes."""
+    nodes = frame.locator("body").evaluate("""root => {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        const values = [];
+        let node;
+        let count = 0;
+        while ((node = walker.nextNode()) && count++ < 3000) {
+            if (["SCRIPT", "STYLE"].includes(node.parentElement?.tagName)) continue;
+            const value = (node.nodeValue || "").trim();
+            if (value) values.push(value.slice(0, 500));
+        }
+        return values;
+    }""")
+    return {email.casefold() for value in nodes for email in EMAIL.findall(value)}
+
 def confirmed_account_chooser(frame, *, expected_email="", extra_hosts=""):
     """Return the unique button only if this is a recognized account chooser."""
     if not allowed_host(frame.url, extra_hosts):
@@ -44,7 +61,7 @@ def confirmed_account_chooser(frame, *, expected_email="", extra_hosts=""):
         body = frame.locator("body").inner_text(timeout=1200)
         if not MUSE_CHOOSER.search(body) or not OTHER_ACCOUNT.search(body):
             return None
-        accounts = {e.casefold() for e in EMAIL.findall(body)}
+        accounts = displayed_account_emails(frame)
         if len(accounts) != 1:
             return None
         if expected_email and expected_email.strip().casefold() not in accounts:

@@ -9,6 +9,7 @@ from playwright.sync_api import sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from muse_one_click_reauth import (
     allowed_host, confirmed_account_chooser, try_one_click_reauth,
+    MUSE_CHOOSER, OTHER_ACCOUNT, EMAIL, LOGIN,
 )
 
 
@@ -51,6 +52,14 @@ class OneClickLoginTests(unittest.TestCase):
             try:
                 page = browser.new_page()
                 visit(page, chooser())
+                synthetic_text = page.locator("body").inner_text(timeout=1000)
+                print("SYNTHETIC_LOGIN_DIAG",
+                      "url_ok", allowed_host(page.url),
+                      "chooser", bool(MUSE_CHOOSER.search(synthetic_text)),
+                      "other", bool(OTHER_ACCOUNT.search(synthetic_text)),
+                      "email_count", len(EMAIL.findall(synthetic_text)),
+                      "login_buttons", page.get_by_role("button", name=LOGIN).count(),
+                      "frames", len(page.frames), flush=True)
                 with patch.dict("muse_one_click_reauth.os.environ", {
                     "MUSE_ONE_CLICK_LOGIN_ENABLED": "true",
                 }):

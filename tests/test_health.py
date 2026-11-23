@@ -1,11 +1,12 @@
 """Pure offline tests of watchdog recovery decisions. No GitHub/Muse network."""
 import sys
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from check_health import assess
+from check_health import assess, main
 
 
 NOW = datetime(2026, 11, 16, 4, 0, tzinfo=timezone.utc)
@@ -57,6 +58,25 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(
             assess([run(1, "completed", "failure")], NOW)[:2], ("warning", False)
         )
+
+    def test_push_health_check_never_dispatches_approvals(self):
+        # The workflow's push trigger must check only, even if recovery
+        # would otherwise be warranted. No GitHub API POST may occur.
+        recent_failure = {
+            "event": "schedule", "status": "completed", "conclusion": "failure",
+            "created_at": (datetime.now(timezone.utc) -
+                           timedelta(minutes=5)).isoformat(),
+        }
+        with patch.dict("check_health.os.environ", {
+            "GITHUB_REPOSITORY": "example/muse-approval-watcher",
+            "GITHUB_TOKEN": "placeholder-token-for-mock",
+        }), patch("sys.argv", ["check_health.py", "--no-recovery"]), \\
+             patch("check_health.github_request", return_value={
+                 "workflow_runs": [recent_failure]
+             }) as request, patch("check_health.append_summary"):
+            self.assertEqual(main(), 0)
+            self.assertEqual(request.call_count, 1)
+            self.assertEqual(request.call_args.kwargs.get("method", "GET"), "GET")
 
     def test_two_consecutive_failures_suppress_futile_extra_dispatch(self):
         # Scheduled checks continue. Only Watchdog's extra dispatches pause.

@@ -9,6 +9,7 @@ Do not log raw cards, user content, cookies, or URLs.
 import argparse
 import hashlib
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -473,7 +474,7 @@ def establish_authenticated_session(page, *, attempts=3,
     print(f"MUSE_WATCHER=STARTUP_FAILED reason={failure}", flush=True)
     if failure == "LOGIN_REQUIRED":
         print("MUSE_WATCHER=ACTION_REQUIRED refresh_muse_session_secret", flush=True)
-    summary_path = __import__("os").environ.get("GITHUB_STEP_SUMMARY")
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
         guidance = (
             "The signed-in Muse UI was not available. Re-sign in on a trusted "
@@ -485,9 +486,9 @@ def establish_authenticated_session(page, *, attempts=3,
         )
         with open(summary_path, "a", encoding="utf-8") as fh:
             fh.write(
-                "## Muse watcher startup blocked\\n\\n"
-                f"- Classification: \`{failure}\`\\n"
-                f"- Next step: {guidance}\\n"
+                "## Muse watcher startup blocked\n\n"
+                f"- Classification: \x60{failure}\x60\n"
+                f"- Next step: {guidance}\n"
             )
     return False
 

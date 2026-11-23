@@ -128,6 +128,7 @@ def main():
     parser.add_argument("--recovery-age", type=int, default=22)
     parser.add_argument("--warning-age", type=int, default=30)
     parser.add_argument("--critical-age", type=int, default=90)
+    parser.add_argument("--no-recovery", action="store_true", help="check health only; do not dispatch")
     args = parser.parse_args()
     repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
     token = os.environ.get("GITHUB_TOKEN", "").strip()
@@ -151,8 +152,8 @@ def main():
         append_summary("error", "github_api_unavailable", "none")
         return 2
 
-    recovery = "not_needed"
-    if dispatch:
+    recovery = "disabled_for_push" if dispatch and args.no_recovery else "not_needed"
+    if dispatch and not args.no_recovery:
         data = json.dumps({
             "ref": branch,
             "inputs": {"mode": "apply"},

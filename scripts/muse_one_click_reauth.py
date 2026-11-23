@@ -111,8 +111,12 @@ def try_one_click_reauth(page, *, expected_email=None, extra_hosts=None):
     allowed_extra = (extra_hosts if extra_hosts is not None else
                      os.environ.get("MUSE_LOGIN_ALLOWED_HOSTS", ""))
 
-    if auth_status(page) != "LOGIN_REQUIRED":
-        return "NOT_LOGGED_OUT"
+    # This recovery routine is entered only AFTER the parent startup
+    # verified sign-out on two consecutive loads. The account chooser may
+    # have a different DOM from Muse's generic login detector, so do not
+    # require that detector to recognize the chooser a second time.
+    if auth_status(page) == "AUTHENTICATED_UI_PRESENT":
+        return "ALREADY_AUTHENTICATED"
 
     outcome = _try_chooser(page, expected_email=expected,
                            extra_hosts=allowed_extra)

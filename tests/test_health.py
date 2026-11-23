@@ -71,12 +71,20 @@ class WatchdogTests(unittest.TestCase):
         self.assertIn("recovery_circuit_open", reason)
 
     def test_recovery_resumes_after_cooldown_and_success_resets_breaker(self):
-        failures = [
+        recent_failures = [
             run(46, "completed", "failure"),
             run(60, "completed", "failure"),
             run(80, "completed", "failure"),
         ]
-        self.assertEqual(assess(failures, NOW)[:2], ("warning", True))
+        self.assertEqual(assess(recent_failures, NOW)[:2], ("warning", False))
+        # After the critical-age cooldown, an external dispatch is allowed
+        # again if GitHub cron remained silent the entire period.
+        old_failures = [
+            run(91, "completed", "failure"),
+            run(105, "completed", "failure"),
+            run(120, "completed", "failure"),
+        ]
+        self.assertEqual(assess(old_failures, NOW)[:2], ("critical", True))
         with_success = [run(1, event="workflow_dispatch")] + [
             run(3, "completed", "failure"),
             run(12, "completed", "failure"),

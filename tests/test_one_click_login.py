@@ -141,6 +141,22 @@ class OneClickLoginTests(unittest.TestCase):
             finally:
                 browser.close()
 
+    def test_otp_login_form_is_never_submitted(self):
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                visit(page, (
+                    '<html><body>뮤즈 로그인'
+                    '<input autocomplete="one-time-code">'
+                    '<button id="submit" onclick="this.dataset.clicked=1">'
+                    '로그인</button></body></html>'
+                ))
+                self.assertEqual(try_one_click_reauth(page), "NOT_PRESENT")
+                self.assertIsNone(page.locator("#submit").get_attribute("data-clicked"))
+            finally:
+                browser.close()
+
     def test_login_entry_may_open_account_chooser(self):
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)

@@ -273,6 +273,56 @@ def auth_ui_category_probe(page):
         print("MUSE_AUTH_SCREEN categories=unreadable", flush=True)
 
 
+
+def login_form_structure_probe(page, stage):
+    """Only safe input/control counts and origin classes, no page values."""
+    host = urlsplit(page.url).hostname or ""
+    safe_host = "muse" if host == "muse.ai" else (
+        "muse_auth" if host == "auth.muse.ai" else
+        "meta_auth" if host.endswith(".meta.com") else "other"
+    )
+    fields = {
+        "host": safe_host,
+        "email_inputs": page.locator('input[type="email"]').count(),
+        "tel_inputs": page.locator('input[type="tel"]').count(),
+        "username_inputs": page.locator('input[autocomplete="username"]').count(),
+        "password_inputs": page.locator('input[type="password"]').count(),
+        "text_inputs": page.locator('input[type="text"]').count(),
+        "login_controls": page.get_by_role(
+            "button", name=re.compile(r"^(?:Log in|Sign in|로그인)$", re.I)
+        ).count(),
+        "continue_controls": page.get_by_role(
+            "button", name=re.compile(r"^(?:Continue|Next|계속|다음)$", re.I)
+        ).count(),
+        "use_password_controls": page.get_by_role(
+            "button", name=re.compile(r"(?:use password|비밀번호.*사용)", re.I)
+        ).count(),
+    }
+    print("MUSE_LOGIN_FORM stage=" + stage + " " +
+          " ".join(f"{key}={value}" for key, value in fields.items()),
+          flush=True)
+
+
+def inspect_login_entry(page):
+    """At most open the site's own login entry; never submit credentials."""
+    names = re.compile(r"^(?:Log in|Sign in|로그인|Log in or sign up)$", re.I)
+    for role in ("button", "link"):
+        candidates = page.get_by_role(role, name=names)
+        for i in range(min(candidates.count(), 4)):
+            target = candidates.nth(i)
+            try:
+                if not target.is_visible():
+                    continue
+                target.click(timeout=3000)
+                page.wait_for_timeout(2500)
+                print("MUSE_LOGIN_FORM entry_clicked=1 role=" + role, flush=True)
+                login_form_structure_probe(page, "after_entry")
+                return
+            except Error:
+                continue
+    print("MUSE_LOGIN_FORM entry_clicked=0", flush=True)
+
+
 def main():
     state = load_state()
     state_expiry_probe(state)
@@ -292,6 +342,7 @@ def main():
                 auth_probe(page, "17s", response)
             ui_structure_probe(page, "17s")
             auth_ui_category_probe(page)
+            login_form_structure_probe(page, "landing")
             stats(page, "landing")
             if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
                 try:
@@ -302,6 +353,8 @@ def main():
                 except Error:
                     print("MUSE_AUTH_PROBE reload_failed=1", flush=True)
                 if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
+                    login_form_structure_probe(page, "reloaded")
+                    inspect_login_entry(page)
                     return 2
             result = click_review_navigation(page)
             print("MUSE_UI_DIAG navigation=" + result, flush=True)

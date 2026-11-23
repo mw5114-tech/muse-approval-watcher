@@ -67,13 +67,17 @@ class WatchdogTests(unittest.TestCase):
             "created_at": (datetime.now(timezone.utc) -
                            timedelta(minutes=5)).isoformat(),
         }
-        with patch.dict("check_health.os.environ", {
-            "GITHUB_REPOSITORY": "example/muse-approval-watcher",
-            "GITHUB_TOKEN": "placeholder-token-for-mock",
-        }), patch("sys.argv", ["check_health.py", "--no-recovery"]), \\
-             patch("check_health.github_request", return_value={
-                 "workflow_runs": [recent_failure]
-             }) as request, patch("check_health.append_summary"):
+        with (
+            patch.dict("check_health.os.environ", {
+                "GITHUB_REPOSITORY": "example/muse-approval-watcher",
+                "GITHUB_TOKEN": "placeholder-token-for-mock",
+            }),
+            patch("sys.argv", ["check_health.py", "--no-recovery"]),
+            patch("check_health.github_request", return_value={
+                "workflow_runs": [recent_failure]
+            }) as request,
+            patch("check_health.append_summary"),
+        ):
             self.assertEqual(main(), 0)
             self.assertEqual(request.call_count, 1)
             self.assertEqual(request.call_args.kwargs.get("method", "GET"), "GET")

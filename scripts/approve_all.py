@@ -408,10 +408,17 @@ def wait_for_authenticated_ui(page, *, checks=18, interval_ms=1000,
     if checks < 1:
         raise ValueError("checks must be positive")
     status = "INCONCLUSIVE"
+    login_streak = 0
     for index in range(checks):
         status = status_fn(page)
         if status == "AUTHENTICATED_UI_PRESENT":
             return status
+        # Five consecutive explicit login prompts are sufficient evidence
+        # that waiting 18 seconds on this same signed-out DOM is futile.
+        # One transient login-looking frame never stops a possible hydrate.
+        login_streak = login_streak + 1 if status == "LOGIN_REQUIRED" else 0
+        if login_streak >= 5:
+            return "LOGIN_REQUIRED"
         if index + 1 < checks:
             page.wait_for_timeout(interval_ms)
     return status
@@ -450,6 +457,11 @@ def establish_authenticated_session(page, *, attempts=3,
         )
         if status == "AUTHENTICATED_UI_PRESENT":
             return True
+        # Verify a real sign-in prompt across one fresh page load.
+        # A persistent login checkpoint cannot be resolved by further
+        # reloads using the same invalid stored session.
+        if len(statuses) >= 2 and statuses[-2:] == ["LOGIN_REQUIRED"] * 2:
+            break
         if attempt + 1 < attempts:
             page.wait_for_timeout(2000 * (attempt + 1))
     if statuses and all(s == "LOGIN_REQUIRED" for s in statuses):
@@ -459,6 +471,24 @@ def establish_authenticated_session(page, *, attempts=3,
     else:
         failure = "AUTH_UNVERIFIED_OR_UI_UNAVAILABLE"
     print(f"MUSE_WATCHER=STARTUP_FAILED reason={failure}", flush=True)
+    if failure == "LOGIN_REQUIRED":
+        print("MUSE_WATCHER=ACTION_REQUIRED refresh_muse_session_secret", flush=True)
+    summary_path = __import__("os").environ.get("GITHUB_STEP_SUMMARY")
+    if summary_path:
+        guidance = (
+            "The signed-in Muse UI was not available. Re-sign in on a trusted "
+            "computer and refresh MUSE_AUTH_B64 through the repository's "
+            "existing local session exporter. No approval actions were sent."
+            if failure == "LOGIN_REQUIRED"
+            else "Muse UI could not be verified. Check site availability and "
+                 "authentication; no approval actions were sent."
+        )
+        with open(summary_path, "a", encoding="utf-8") as fh:
+            fh.write(
+                "## Muse watcher startup blocked\\n\\n"
+                f"- Classification: \`{failure}\`\\n"
+                f"- Next step: {guidance}\\n"
+            )
     return False
 
 

@@ -127,6 +127,11 @@ def try_one_click_reauth(page, *, expected_email=None, extra_hosts=None):
         return "NOT_PRESENT"
     try:
         body = page.locator("body").inner_text(timeout=1000)
+        # A visible but unverified account chooser (wrong account, multiple
+        # accounts or password prompt) must NOT fall through to the generic
+        # login-entry click. This would defeat the account guard.
+        if MUSE_CHOOSER.search(body) or OTHER_ACCOUNT.search(body):
+            return "CHOOSER_UNVERIFIED"
         entry = page.get_by_role("button", name=LOGIN)
         if (not re.search(r"(?:로그인|Sign\s*in|Log\s*in)", body, re.I)
                 or entry.count() != 1 or not entry.first.is_visible()

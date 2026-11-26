@@ -28,7 +28,7 @@ def age(item, now, field='created_at'):
     return max(0, (now-parse_iso(item[field])).total_seconds()/60)
 
 
-def assess(runs, now, recovery_age=17, warning_age=25, critical_age=60, stuck_age=20, failure_cooldown=30):
+def assess(runs, now, recovery_age=12, warning_age=25, critical_age=60, stuck_age=20, failure_cooldown=30):
     """Decide recovery using apply history; never dispatch into an active run."""
     candidates = sorted((r for r in runs if r.get('created_at') and (r.get('event')=='schedule' or (r.get('event') in {'workflow_dispatch','push'} and r.get('display_title')=='Muse watcher / apply'))), key=lambda r:r['created_at'], reverse=True)
     active = [r for r in runs if r.get('status') in ACTIVE and r.get('created_at')]
@@ -54,7 +54,8 @@ def assess(runs, now, recovery_age=17, warning_age=25, critical_age=60, stuck_ag
         if age(r,now)>90: break
         if r.get('status')=='completed' and r.get('conclusion')=='success': break
         if r.get('status')=='completed': failures+=1
-    recovery = next((r for r in candidates if r.get('event')=='workflow_dispatch'),None)
+    # Only a failed extra attempt in the current failure streak limits recovery.
+    recovery = next((r for r in candidates[:failures] if r.get("event") in {"workflow_dispatch", "push"}), None)
     cooldown_ok = failures<2 or recovery is None or age(recovery,now)>=failure_cooldown
     ready = elapsed>=2 and cooldown_ok
     return ('critical' if level=='critical' else 'warning'),ready,'retry_failure' if ready else 'failure_cooldown'
@@ -104,7 +105,7 @@ def append_summary(level, detail, recovery):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--recovery-age", type=int, default=17)
+    parser.add_argument("--recovery-age", type=int, default=12)
     parser.add_argument("--warning-age", type=int, default=25)
     parser.add_argument("--critical-age", type=int, default=60)
     parser.add_argument("--no-recovery", action="store_true", help="check health only; do not dispatch")

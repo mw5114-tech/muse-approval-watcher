@@ -147,7 +147,7 @@ def review_state(page):
     panel = page.locator(STATUS_PANEL)
     if not visible_any(panel):
         return "UNVERIFIED"
-    if visible_any(page.locator(PANEL_CARD)) or visible_any(review_rows(page)):
+    if visible_any(panel.locator(CARD)) or visible_any(page.locator(PANEL_CARD)) or visible_any(review_rows(page)):
         return "PENDING"
     if visible_any(page.get_by_text(PENDING_BANNER)):
         return "PENDING_NOT_RENDERED"
@@ -337,7 +337,7 @@ def scan_once(page, mode, seen, prefer_always, max_clicks, *,
             continue
 
         allow = control_pair(scope)
-        if allow is None or not visible(scope):
+        if allow is None or not visible(scope) or (not prefer_always and (not ALLOW.fullmatch(label(allow)) or ALWAYS.search(label(allow)))):
             # It may be transitioning after a previous click. Avoid a blind
             # repeat on an ambiguous or disabled approval surface.
             seen.add(key)

@@ -1,9 +1,9 @@
-name: Muse approval watcher (15m)
+name: Muse approval watcher (10m)
 run-name: Muse watcher / ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
 
 on:
   schedule:
-    - cron: '3/15 * * * *'
+    - cron: '3/10 * * * *'
   workflow_dispatch:
     inputs:
       mode:

@@ -117,8 +117,8 @@ def open_review_row(page, index):
 
 
 REVIEW_NAV = re.compile(r"^(?:검토|검토 필요|승인|승인 요청|권한|Review|Approvals?|Permissions?)$", re.I)
-PENDING_BANNER = re.compile(r"(?:검토가 필요한 작업\\s*[1-9][0-9]*개|[1-9][0-9]*\\s*(?:tasks?|items?)\\s*(?:need|require)\\s*review)", re.I)
-EMPTY_REVIEW = re.compile(r"^(?:검토가 필요한 작업이 없습니다|검토할 작업이 없습니다|검토할 항목이 없습니다|검토 필요 없음|승인 요청이 없습니다|No (?:pending approvals|items to review|tasks to review|review requests))\\.?$", re.I)
+PENDING_BANNER = re.compile(r"(?:검토가 필요한 작업\s*[1-9][0-9]*개|[1-9][0-9]*\s*(?:tasks?|items?)\s*(?:need|require)\s*review)", re.I)
+EMPTY_REVIEW = re.compile(r"^(?:검토가 필요한 작업이 없습니다|검토할 작업이 없습니다|검토할 항목이 없습니다|검토 필요 없음|승인 요청이 없습니다|No (?:pending approvals|items to review|tasks to review|review requests))\.?$", re.I)
 
 
 def visible_any(nodes):
@@ -145,12 +145,12 @@ def review_tab_selected(tab):
 def review_state(page):
     """A zero-card count is not evidence that the review queue is empty."""
     panel = page.locator(STATUS_PANEL)
-    if not visible_any(panel):
-        return "UNVERIFIED"
     if visible_any(panel.locator(CARD)) or visible_any(page.locator(PANEL_CARD)) or visible_any(review_rows(page)):
         return "PENDING"
     if visible_any(page.get_by_text(PENDING_BANNER)):
         return "PENDING_NOT_RENDERED"
+    if not visible_any(panel):
+        return "UNVERIFIED"
     if visible_any(panel.get_by_text(EMPTY_REVIEW)):
         return "EMPTY_CONFIRMED"
     return "UNVERIFIED"

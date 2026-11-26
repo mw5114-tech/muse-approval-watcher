@@ -17,7 +17,7 @@ def r(a, status='completed', conclusion='success', event='schedule', title='', f
 
 class WatchdogReliabilityTest(unittest.TestCase):
     def test_recent(self):self.assertEqual(assess([r(15)],now),('healthy',False,'recent'))
-    def test_boundary(self):self.assertFalse(assess([r(21)],now)[1]);self.assertTrue(assess([r(22)],now)[1])
+    def test_boundary(self):self.assertFalse(assess([r(16)],now)[1]);self.assertTrue(assess([r(17)],now)[1])
     def test_missing(self):self.assertTrue(assess([],now)[1])
     def test_active(self):self.assertFalse(assess([r(40),r(1,'queued',None)],now)[1])
     def test_stuck(self):self.assertEqual(assess([r(40,'queued',None),r(55)],now),('warning',False,'active_stuck'))

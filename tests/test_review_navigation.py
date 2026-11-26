@@ -41,8 +41,10 @@ class ReviewNavigationTests(unittest.TestCase):
         self.assertEqual(review_state(self.page), "PENDING_NOT_RENDERED")
     def signed_in_page(self, html):
         self.page.route("https://muse.ai/", lambda route: route.fulfill(
-            status=200, content_type="text/html", body=html))
+            status=200, content_type="text/html; charset=utf-8",
+            body=html.encode("utf-8")))
         self.page.goto("https://muse.ai/")
+        self.assertEqual(self.page.evaluate("document.characterSet"), "UTF-8")
     def test_authenticated_idle_without_review_panel(self):
         self.signed_in_page('<button data-hatch-avatar-interaction="true">Account</button>')
         self.assertEqual(final_review_observation(self.page), "IDLE_NO_VISIBLE_REQUESTS")

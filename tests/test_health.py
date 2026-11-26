@@ -27,11 +27,11 @@ class WatchdogTests(unittest.TestCase):
     def test_ten_minute_schedule_grace_prevents_extra_dispatch(self):
         # A normal 10-minute scheduled watcher must not cause a recovery run.
         self.assertEqual(assess([run(10)], NOW)[:2], ("healthy", False))
-        self.assertEqual(assess([run(16.9)], NOW)[:2], ("healthy", False))
+        self.assertEqual(assess([run(11.9)], NOW)[:2], ("healthy", False))
 
     def test_missed_ten_minute_schedule_starts_recovery_after_grace(self):
-        # Recover after one skipped slot plus a seven-minute grace period.
-        level, dispatch, reason = assess([run(17)], NOW)
+        # Recover after one skipped slot plus a two-minute grace period.
+        level, dispatch, reason = assess([run(12)], NOW)
         self.assertTrue(dispatch)
         self.assertIn("schedule_gap", reason)
         self.assertEqual(level, "healthy")

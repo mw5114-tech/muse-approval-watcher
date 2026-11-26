@@ -6,7 +6,7 @@ from unittest.mock import patch
 from urllib.error import URLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from check_health import assess, github_request
+from check_health import assess, github_request, active_diagnostics
 
 now=datetime(2026,11,26,12,tzinfo=timezone.utc)
 
@@ -35,6 +35,28 @@ class WatchdogReliabilityTest(unittest.TestCase):
     def test_observe_active(self):self.assertFalse(assess([r(1,'in_progress',None,'workflow_dispatch','Muse watcher / observe'),r(40)],now)[1])
     def test_invalid_time(self):self.assertEqual(assess([r(-10)],now)[0],'error')
     def test_unknown_status(self):self.assertEqual(assess([r(1,'other')],now)[0],'error')
+    def test_queue_timing_warning(self):
+        self.assertEqual(active_diagnostics([r(11,'queued',None)],now),
+                         [(True,'status=queued waiting_minutes=11.0')])
+        self.assertEqual(active_diagnostics([r(2,'queued',None)],now),
+                         [(False,'status=queued waiting_minutes=2.0')])
+    def test_running_timing_distinguishes_queue_and_runtime(self):
+        run=r(15,'in_progress',None)
+        run['run_started_at']=(now-timedelta(minutes=4)).isoformat()
+        self.assertEqual(active_diagnostics([run],now),
+                         [(True,'status=in_progress running_minutes=4.0 queue_minutes=11.0')])
+        run['run_started_at']=(now-timedelta(minutes=13)).isoformat()
+        self.assertEqual(active_diagnostics([run],now),
+                         [(True,'status=in_progress running_minutes=13.0 queue_minutes=2.0')])
+    def test_missing_start_time_is_not_fabricated(self):
+        self.assertEqual(active_diagnostics([r(13,'in_progress',None)],now),
+                         [(True,'status=in_progress active_minutes=13.0 start_time_unknown')])
+    def test_completed_and_future_runs_not_reported_as_active(self):
+        self.assertEqual(active_diagnostics([r(40),r(-1,'queued',None)],now),[])
+    def test_invalid_start_time_is_nonfatal(self):
+        run=r(15,'in_progress',None)
+        run['run_started_at']='invalid'
+        self.assertEqual(active_diagnostics([run],now),[(True,'active_timing_unavailable')])
     @patch('check_health.urlopen', side_effect=URLError('simulated timeout'))
     def test_post_not_repeated(self, mocked):
         with self.assertRaises(URLError):

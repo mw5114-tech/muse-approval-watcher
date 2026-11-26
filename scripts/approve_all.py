@@ -93,7 +93,7 @@ def approval_items(page, *, panel_only=False):
 
 def review_rows(page):
     """Only review-needed accordion buttons in Muse's actual status panel."""
-    return page.locator(STATUS_PANEL).get_by_role("button", name=REVIEW_LABEL)
+    return page.locator(STATUS_PANEL).get_by_role("button", name=REVIEW_LABEL).and_(page.locator("[aria-expanded]"))
 
 
 def open_review_row(page, index):
@@ -116,30 +116,74 @@ def open_review_row(page, index):
         return count, False
 
 
+REVIEW_NAV = re.compile(r"^(?:검토|검토 필요|승인|승인 요청|권한|Review|Approvals?|Permissions?)$", re.I)
+PENDING_BANNER = re.compile(r"(?:검토가 필요한 작업\\s*[1-9][0-9]*개|[1-9][0-9]*\\s*(?:tasks?|items?)\\s*(?:need|require)\\s*review)", re.I)
+EMPTY_REVIEW = re.compile(r"^(?:검토가 필요한 작업이 없습니다|검토할 작업이 없습니다|검토할 항목이 없습니다|검토 필요 없음|승인 요청이 없습니다|No (?:pending approvals|items to review|tasks to review|review requests))\\.?$", re.I)
+
+
+def visible_any(nodes):
+    return any(visible(n) for n in nodes.all()[:75])
+
+
+def review_tabs(page):
+    panel = page.locator(STATUS_PANEL)
+    return panel.locator('button[aria-pressed], [role="tab"], button[aria-selected]')
+
+
+def review_tab_match(tab):
+    # Use exact known accessibility names or an explicit shield icon on a tab.
+    names = [label(tab), tab.get_attribute("aria-label") or "", tab.get_attribute("title") or ""]
+    if any(REVIEW_NAV.fullmatch(name.strip()) for name in names):
+        return True
+    return bool(tab.locator('svg.lucide-shield-check, svg[data-icon="shield-check"], svg[data-testid="shield-check"]').count())
+
+
+def review_tab_selected(tab):
+    return tab.get_attribute("aria-pressed") == "true" or tab.get_attribute("aria-selected") == "true"
+
+
+def review_state(page):
+    """A zero-card count is not evidence that the review queue is empty."""
+    panel = page.locator(STATUS_PANEL)
+    if not visible_any(panel):
+        return "UNVERIFIED"
+    if visible_any(page.locator(PANEL_CARD)) or visible_any(review_rows(page)):
+        return "PENDING"
+    if visible_any(page.get_by_text(PENDING_BANNER)):
+        return "PENDING_NOT_RENDERED"
+    if visible_any(panel.get_by_text(EMPTY_REVIEW)):
+        return "EMPTY_CONFIRMED"
+    return "UNVERIFIED"
+
+
 def open_review_panel(page):
-    """Open the built-in approvals panel, not a permission-grant button."""
+    """Use either the chat Review button or the actual account shield tab."""
     try:
-        banner = page.locator(BACKGROUND)
-        for item in banner.all()[:3]:
-            for button in item.locator("button").all():
-                if visible(button):
-                    button.click(timeout=1300)
-                    return True
-        tab_found = False
-        for tab in page.locator("button[aria-pressed]").all():
-            name = (tab.get_attribute("aria-label") or "").strip().lower()
-            if name in REVIEW_TAB:
-                tab_found = True
-                if tab.get_attribute("aria-pressed") != "true":
-                    tab.click(timeout=1300)
-                    return True
-                return False
-        # Approvals sometimes live behind the account avatar.
-        # Never toggle the avatar if the approval tab is already available.
-        if not tab_found and not page.locator(CARD).count():
+        if review_state(page) in {"PENDING", "EMPTY_CONFIRMED"}:
+            return True
+        # The composer banner is explicit navigation, not a permission control.
+        for role in ("button", "link"):
+            for button in page.get_by_role(role, name=re.compile(r"^(?:검토|Review)$", re.I)).all()[:12]:
+                if not visible(button):
+                    continue
+                if button.locator('xpath=ancestor::*[@data-testid="hatch-inline-approval-card" or @data-testid="hatch-status-panel-sliding-surface"]').count():
+                    continue
+                button.click(timeout=1800)
+                page.wait_for_timeout(650)
+                return True
+        panel = page.locator(STATUS_PANEL)
+        if not visible_any(panel):
             avatar = page.locator('[data-hatch-avatar-interaction="true"]')
-            if avatar.count() and visible(avatar.first):
-                avatar.first.click(timeout=1300)
+            for node in avatar.all()[:5]:
+                if visible(node):
+                    node.click(timeout=1800)
+                    page.wait_for_timeout(650)
+                    break
+        for tab in review_tabs(page).all()[:12]:
+            if visible(tab) and review_tab_match(tab):
+                if not review_tab_selected(tab):
+                    tab.click(timeout=1800)
+                    page.wait_for_timeout(650)
                 return True
     except Error:
         pass
@@ -513,7 +557,7 @@ def main():
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         try:
-            context = browser.new_context(storage_state=state, locale="ko-KR")
+            context = browser.new_context(storage_state=state, locale="ko-KR", viewport={"width": 1680, "height": 900})
             page = context.new_page()
             # Page readiness is independent of HTTP 200 / DOMContentLoaded.
             # Never approve when the account UI remains unverified.
@@ -551,7 +595,7 @@ def main():
                         return 2
                     print(
                         f"MUSE_HEARTBEAT scanned={totals[0]} clicked={totals[1]} "
-                        f"unrecognized={totals[2]}",
+                        f"unrecognized={totals[2]} review_state={review_state(page)}",
                         flush=True,
                     )
                     last_heartbeat = now
@@ -580,6 +624,11 @@ def main():
                 f"unrecognized={totals[2]} review_rows_visited={len(visited_review_rows)}",
                 flush=True,
             )
+            final_review_state = review_state(page)
+            print(f"MUSE_REVIEW_STATE={final_review_state}", flush=True)
+            if final_review_state == "UNVERIFIED" or (mode == "apply" and final_review_state != "EMPTY_CONFIRMED"):
+                print("MUSE_WATCHER=REVIEW_NOT_VERIFIED", flush=True)
+                return 3
             return 0
         finally:
             browser.close()

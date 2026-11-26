@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from approve_all import open_review_panel, review_state
+from approve_all import open_review_panel, review_state, final_review_observation
 
 class ReviewNavigationTests(unittest.TestCase):
     def setUp(self):
@@ -39,5 +39,30 @@ class ReviewNavigationTests(unittest.TestCase):
     def test_banner_and_missing_cards(self):
         self.page.set_content('<div>검토가 필요한 작업 5개가 있습니다</div><aside data-testid="hatch-status-panel-sliding-surface"></aside>')
         self.assertEqual(review_state(self.page), "PENDING_NOT_RENDERED")
+    def signed_in_page(self, html):
+        self.page.route("https://muse.ai/", lambda route: route.fulfill(
+            status=200, content_type="text/html", body=html))
+        self.page.goto("https://muse.ai/")
+    def test_authenticated_idle_without_review_panel(self):
+        self.signed_in_page('<button data-hatch-avatar-interaction="true">Account</button>')
+        self.assertEqual(final_review_observation(self.page), "IDLE_NO_VISIBLE_REQUESTS")
+    def test_idle_requires_visible_account_ui(self):
+        self.signed_in_page('<button hidden data-hatch-avatar-interaction="true">Account</button>')
+        self.assertEqual(final_review_observation(self.page), "UNVERIFIED")
+    def test_idle_not_used_if_review_button_visible(self):
+        self.signed_in_page('<button data-hatch-avatar-interaction="true">Account</button><button>검토</button>')
+        self.assertEqual(final_review_observation(self.page), "UNVERIFIED")
+    def test_idle_not_used_after_observed_approval(self):
+        self.signed_in_page('<button data-hatch-avatar-interaction="true">Account</button>')
+        self.assertEqual(final_review_observation(self.page, 1, 0, 0), "UNVERIFIED")
+    def test_idle_not_used_for_pending_banner(self):
+        self.signed_in_page('<button data-hatch-avatar-interaction="true">Account</button><div>검토가 필요한 작업 3개가 있습니다</div>')
+        self.assertEqual(final_review_observation(self.page), "PENDING_NOT_RENDERED")
+    def test_idle_not_used_for_visible_unverified_panel(self):
+        self.signed_in_page('<button data-hatch-avatar-interaction="true">Account</button><aside data-testid="hatch-status-panel-sliding-surface">Loading</aside>')
+        self.assertEqual(final_review_observation(self.page), "UNVERIFIED")
+    def test_idle_not_used_when_signed_out(self):
+        self.signed_in_page('<button>로그인</button>')
+        self.assertEqual(final_review_observation(self.page), "UNVERIFIED")
 if __name__ == "__main__":
     unittest.main()

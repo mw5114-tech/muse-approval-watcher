@@ -3,7 +3,8 @@ run-name: Muse watcher / ${{ (github.event_name == 'schedule' || github.event_na
 
 on:
   schedule:
-    - cron: '4/10 * * * *'
+    # Explicit ten-minute slots; offset avoids the top-of-hour queue peak.
+    - cron: '6,16,26,36,46,56 * * * *'
   # Only a write to this exact request file on main requests a run.
   push:
     branches: [main]

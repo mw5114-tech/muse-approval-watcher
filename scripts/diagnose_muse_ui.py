@@ -8,6 +8,7 @@ import re
 from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright, Error
 from check_muse_session import auth_status, load_state
+from approve_all import open_review_panel, review_state, review_tabs, review_tab_match, review_tab_selected, visible
 
 CARD = '[data-testid="hatch-inline-approval-card"]'
 SCOPE = CARD + ':not([data-hatch-background-approval-surface="true"])'
@@ -385,7 +386,7 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
-            context = browser.new_context(storage_state=state, locale="ko-KR")
+            context = browser.new_context(storage_state=state, locale="ko-KR", viewport={"width": 1680, "height": 900})
             page = context.new_page()
             response = page.goto("https://muse.ai/", wait_until="domcontentloaded", timeout=40000)
             page.wait_for_timeout(5000)
@@ -413,13 +414,16 @@ def main():
                     login_frame_structure_probe(page, "before_entry")
                     inspect_login_entry(page)
                     return 2
-            probe_account_panel(page)
+            entered = open_review_panel(page)
+            page.wait_for_timeout(1800)
+            print(f"MUSE_UI_DIAG shared_navigation={entered} review_state={review_state(page)}", flush=True)
+            print("MUSE_UI_DIAG visible_tabs=" + ",".join(f"{int(review_tab_match(t))}:{int(review_tab_selected(t))}" for t in review_tabs(page).all()[:12] if visible(t)), flush=True)
             stats(page, "after_account_panel")
-            result = click_review_navigation(page)
+            result = "shared_navigation_only"
             print("MUSE_UI_DIAG navigation=" + result, flush=True)
             page.wait_for_timeout(1600)
             stats(page, "after_review_navigation")
-            inspect_review_buttons(page)
+            # No generic review-button clicks; the shared navigation is explicit.
             stats(page, "after_review_sequence")
             inspect_frame_card_counts(page)
             inspect_review_button_structure(page)

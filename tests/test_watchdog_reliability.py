@@ -3,10 +3,10 @@ import unittest
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from check_health import assess, github_request, active_diagnostics
+from check_health import assess, github_request, active_diagnostics, api_error_detail, parse_iso
 
 now=datetime(2026,11,26,12,tzinfo=timezone.utc)
 
@@ -35,6 +35,21 @@ class WatchdogReliabilityTest(unittest.TestCase):
     def test_observe_active(self):self.assertFalse(assess([r(1,'in_progress',None,'workflow_dispatch','Muse watcher / observe'),r(40)],now)[1])
     def test_invalid_time(self):self.assertEqual(assess([r(-10)],now)[0],'error')
     def test_unknown_status(self):self.assertEqual(assess([r(1,'other')],now)[0],'error')
+    def test_api_error_categories_do_not_expose_response(self):
+        for code, category in [(401,'auth_permission_or_rate_limit'),
+                               (403,'auth_permission_or_rate_limit'),
+                               (404,'resource_not_found_or_inaccessible'),
+                               (429,'rate_limited'),
+                               (503,'github_server_error')]:
+            error=HTTPError('https://example.invalid/private',code,'sensitive body',None,None)
+            self.assertEqual(api_error_detail(error),f'{category} http_status={code}')
+        self.assertEqual(api_error_detail(URLError('private URL')), 'network_or_timeout')
+        self.assertEqual(api_error_detail(TimeoutError()), 'network_or_timeout')
+    def test_timestamp_validation(self):
+        for bad in [None, 123, 'invalid', '2026-11-26T12:00:00']:
+            with self.assertRaises(ValueError):
+                parse_iso(bad)
+        self.assertEqual(parse_iso('2026-11-26T12:00:00Z'), now)
     def test_queue_timing_warning(self):
         self.assertEqual(active_diagnostics([r(11,'queued',None)],now),
                          [(True,'status=queued waiting_minutes=11.0')])

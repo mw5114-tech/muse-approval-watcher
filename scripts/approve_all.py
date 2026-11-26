@@ -156,6 +156,31 @@ def review_state(page):
     return "UNVERIFIED"
 
 
+def final_review_observation(page, observed=0, clicked=0, blocked=0):
+    """Distinguish an authenticated idle screen from an unverified review queue.
+
+    No visible request is an observation, not proof of an empty server queue.
+    This function never clicks or authorizes anything.
+    """
+    state = review_state(page)
+    if state != "UNVERIFIED":
+        return state
+    if observed or clicked or blocked:
+        return state
+    if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
+        return state
+    if not visible_any(page.locator(
+        '[data-hatch-avatar-interaction="true"], [data-testid="hatch-thread-row"]'
+    )):
+        return state
+    if visible_any(page.locator(STATUS_PANEL)) or visible_any(page.locator(CARD)):
+        return state
+    for role in ("button", "link"):
+        if visible_any(page.get_by_role(role, name=REVIEW_NAV)):
+            return state
+    return "IDLE_NO_VISIBLE_REQUESTS"
+
+
 def open_review_panel(page):
     """Use either the chat Review button or the actual account shield tab."""
     try:
@@ -624,8 +649,14 @@ def main():
                 f"unrecognized={totals[2]} review_rows_visited={len(visited_review_rows)}",
                 flush=True,
             )
-            final_review_state = review_state(page)
+            final_review_state = final_review_observation(page, *totals)
             print(f"MUSE_REVIEW_STATE={final_review_state}", flush=True)
+            if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
+                print("MUSE_WATCHER=AUTH_LOST_DURING_RUN", flush=True)
+                return 2
+            if final_review_state == "IDLE_NO_VISIBLE_REQUESTS":
+                print("MUSE_WATCHER=IDLE no_visible_requests queue_not_verified", flush=True)
+                return 0
             if final_review_state == "UNVERIFIED" or (mode == "apply" and final_review_state != "EMPTY_CONFIRMED"):
                 print("MUSE_WATCHER=REVIEW_NOT_VERIFIED", flush=True)
                 return 3

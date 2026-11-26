@@ -354,6 +354,31 @@ def inspect_login_entry(page):
     print("MUSE_LOGIN_FORM entry_clicked=0", flush=True)
 
 
+def probe_account_panel(page):
+    """Open the account surface only; never select a permission control."""
+    panel = page.locator('[data-testid="hatch-status-panel-sliding-surface"]')
+    avatar = page.locator('[data-hatch-avatar-interaction="true"]')
+    print(f"MUSE_UI_DIAG account_panel_before={count_visible(panel)} avatar={count_visible(avatar)}", flush=True)
+    if not count_visible(panel)[1] and count_visible(avatar)[1]:
+        for node in avatar.all()[:5]:
+            if node.is_visible():
+                node.click(timeout=1800)
+                page.wait_for_timeout(1500)
+                break
+    print(f"MUSE_UI_DIAG account_panel_after={count_visible(panel)}", flush=True)
+    # Inspect accessible tab structure, without logging user content.
+    for role in ("tab", "button"):
+        for pattern in (r"^(?:Approvals?|Permissions?|Review|검토|검토 필요|승인|권한|보안)$",):
+            group = page.get_by_role(role, name=re.compile(pattern, re.I))
+            print(f"MUSE_UI_DIAG review_tab_role={role} candidates={count_visible(group)}", flush=True)
+            for node in group.all()[:5]:
+                if node.is_visible() and node.get_attribute("aria-selected") != "true" and node.get_attribute("aria-pressed") != "true":
+                    node.click(timeout=1800)
+                    page.wait_for_timeout(1500)
+                    return
+    print("MUSE_UI_DIAG exact_review_tab_not_found", flush=True)
+
+
 def main():
     state = load_state()
     state_expiry_probe(state)
@@ -388,6 +413,8 @@ def main():
                     login_frame_structure_probe(page, "before_entry")
                     inspect_login_entry(page)
                     return 2
+            probe_account_panel(page)
+            stats(page, "after_account_panel")
             result = click_review_navigation(page)
             print("MUSE_UI_DIAG navigation=" + result, flush=True)
             page.wait_for_timeout(1600)

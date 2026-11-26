@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "approve_all": true,
-  "prefer_always": true,
+  "prefer_always": false,
   "max_approvals_per_run": 50,
   "scan_seconds": 230,
   "max_attempts_per_card": 3,

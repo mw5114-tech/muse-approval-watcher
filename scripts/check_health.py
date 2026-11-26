@@ -61,6 +61,46 @@ def assess(runs, now, recovery_age=12, warning_age=25, critical_age=60, stuck_ag
     return ('critical' if level=='critical' else 'warning'),ready,'retry_failure' if ready else 'failure_cooldown'
 
 
+
+def active_diagnostics(runs, now, queue_warning=10, execution_warning=12):
+    """Read-only timing diagnostics. Never changes recovery or approval policy."""
+    details = []
+    for run in runs:
+        status = run.get("status")
+        if status not in ACTIVE or not run.get("created_at"):
+            continue
+        try:
+            created = parse_iso(run["created_at"])
+            if created > now:
+                continue
+            total = (now - created).total_seconds() / 60
+            if status == "in_progress":
+                started = parse_iso(run["run_started_at"]) if run.get("run_started_at") else None
+                if started is not None and created <= started <= now:
+                    queue = (started - created).total_seconds() / 60
+                    running = (now - started).total_seconds() / 60
+                    detail = f"running_minutes={running:.1f} queue_minutes={queue:.1f}"
+                    warning = running >= execution_warning or queue >= queue_warning
+                else:
+                    detail = f"active_minutes={total:.1f} start_time_unknown"
+                    warning = total >= execution_warning
+            else:
+                detail = f"waiting_minutes={total:.1f}"
+                warning = total >= queue_warning
+            details.append((warning, f"status={status} {detail}"))
+        except (TypeError, ValueError, KeyError):
+            details.append((True, "active_timing_unavailable"))
+    return details
+
+
+def emit_diagnostics(runs, now):
+    for warning, detail in active_diagnostics(runs, now):
+        if warning:
+            print(f"::warning title=Muse workflow timing::{detail}", flush=True)
+        else:
+            print(f"MUSE_TIMING {detail}", flush=True)
+
+
 def github_request(url, token, method="GET", data=None):
     headers = {
         "Authorization": f"Bearer {token}",
@@ -133,6 +173,10 @@ def main():
         print(f"MUSE_WATCHDOG=ERROR read_api={type(error).__name__}", flush=True)
         append_summary("error", "github_api_unavailable", "none")
         return 2
+
+    emit_diagnostics(runs, datetime.now(timezone.utc))
+    if level in {"warning", "critical", "error"}:
+        print(f"::warning title=Muse watchdog health::level={level} reason={reason}", flush=True)
 
     recovery = "disabled_for_push" if dispatch and args.no_recovery else "not_needed"
     if dispatch and not args.no_recovery:

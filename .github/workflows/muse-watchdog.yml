@@ -2,7 +2,8 @@ name: Muse schedule health watchdog
 
 on:
   schedule:
-    - cron: '2/5 * * * *'
+    # Stagger health checks independently of the watcher's 06/16/... slots.
+    - cron: '3,8,13,18,23,28,33,38,43,48,53,58 * * * *'
   workflow_dispatch:
   push:
     branches: [main]

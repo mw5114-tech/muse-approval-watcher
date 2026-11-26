@@ -30,7 +30,7 @@ def age(item, now, field='created_at'):
 
 def assess(runs, now, recovery_age=17, warning_age=25, critical_age=60, stuck_age=20, failure_cooldown=30):
     """Decide recovery using apply history; never dispatch into an active run."""
-    candidates = sorted((r for r in runs if r.get('created_at') and (r.get('event')=='schedule' or (r.get('event')=='workflow_dispatch' and r.get('display_title')=='Muse watcher / apply'))), key=lambda r:r['created_at'], reverse=True)
+    candidates = sorted((r for r in runs if r.get('created_at') and (r.get('event')=='schedule' or (r.get('event') in {'workflow_dispatch','push'} and r.get('display_title')=='Muse watcher / apply'))), key=lambda r:r['created_at'], reverse=True)
     active = [r for r in runs if r.get('status') in ACTIVE and r.get('created_at')]
     if any((parse_iso(r['created_at'])-now).total_seconds()>300 for r in candidates+active):
         return 'error',False,'invalid_run_timestamp'

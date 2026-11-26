@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import quote
 
 
 WORKFLOW = "muse-approval-watch.yml"
@@ -23,66 +24,40 @@ def parse_iso(value):
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def age_minutes(item, now):
-    return (now - parse_iso(item["created_at"])).total_seconds() / 60
+def age(item, now, field='created_at'):
+    return max(0, (now-parse_iso(item[field])).total_seconds()/60)
 
 
-def assess(runs, now, recovery_age=22, warning_age=30, critical_age=90, stuck_age=25):
-    """Pure decision logic for unit tests. Returns (severity, dispatch, reason).
-
-    Recency is measured across schedule AND workflow_dispatch runs, because a
-    recovery-triggered run is a real attempt at doing approval work.
-    """
-    candidates = sorted(
-        [r for r in runs if r.get("event") in {"schedule", "workflow_dispatch"}
-         and r.get("created_at")],
-        key=lambda r: r["created_at"], reverse=True,
-    )
+def assess(runs, now, recovery_age=17, warning_age=25, critical_age=60, stuck_age=20, failure_cooldown=30):
+    """Decide recovery using apply history; never dispatch into an active run."""
+    candidates = sorted((r for r in runs if r.get('created_at') and (r.get('event')=='schedule' or (r.get('event')=='workflow_dispatch' and r.get('display_title')=='Muse watcher / apply'))), key=lambda r:r['created_at'], reverse=True)
+    active = [r for r in runs if r.get('status') in ACTIVE and r.get('created_at')]
+    if any((parse_iso(r['created_at'])-now).total_seconds()>300 for r in candidates+active):
+        return 'error',False,'invalid_run_timestamp'
     if not candidates:
-        return "warning", True, "no_watcher_runs_found"
+        if active: return 'warning',False,'active_without_apply_history'
+        return 'warning',True,'no_apply_runs'
     latest = candidates[0]
-    age = age_minutes(latest, now)
-    if age < -5:
-        return "error", False, "invalid_run_timestamp"
-    status = latest.get("status")
-    if status in ACTIVE:
-        if age <= stuck_age:
-            return "healthy", False, f"running_or_queued age_minutes={max(age, 0):.1f}"
-        # A queued/running attempt has stalled; launch one recovery attempt.
-        # The main workflow's own concurrency group prevents concurrent work.
-        level = "critical" if age >= critical_age else "warning"
-        return level, True, f"watcher_stuck age_minutes={age:.1f}"
-    if status not in TERMINAL:
-        return "error", False, "unknown_run_status"
-    if latest.get("conclusion") != "success":
-        if age < 2:
-            return "warning", False, "failed_just_now_retry_cooldown"
-        # When the site or session is repeatedly failing, firing another
-        # Playwright run every watchdog tick just creates failure spam and
-        # pending concurrency replacements. Preserve scheduled checks, but
-        # pause EXTRA dispatches until the critical-age cooldown expires.
-        consecutive_failures = 0
-        for item in candidates:
-            if age_minutes(item, now) > 90:
-                break
-            if item.get("status") == "completed" and item.get("conclusion") == "success":
-                break
-            if item.get("status") == "completed" and item.get("conclusion") != "success":
-                consecutive_failures += 1
-        if consecutive_failures >= 2 and age < critical_age:
-            return (
-                "warning", False,
-                f"recovery_circuit_open failures={consecutive_failures} "
-                f"age_minutes={age:.1f}",
-            )
-        level = "critical" if age >= critical_age else "warning"
-        return level, True, f"last_run_failed age_minutes={age:.1f}"
-    if age < recovery_age:
-        return "healthy", False, f"watcher_recent age_minutes={max(age, 0):.1f}"
-    level = "critical" if age >= critical_age else (
-        "warning" if age >= warning_age else "healthy"
-    )
-    return level, True, f"watcher_missing_schedule age_minutes={age:.1f}"
+    if latest.get('status') not in ACTIVE | {'completed'}:
+        return 'error',False,'unknown_run_status'
+    last_ok = next((r for r in candidates if r.get('status')=='completed' and r.get('conclusion')=='success'),None)
+    outage = age(last_ok or candidates[-1],now)
+    level = 'critical' if outage>=critical_age else 'warning' if outage>=warning_age else 'healthy'
+    if active:
+        stalled = max(age(r,now) for r in active)>=stuck_age
+        return ('critical' if level=='critical' else 'warning') if stalled else level,False,'active_stuck' if stalled else 'active'
+    if latest.get('conclusion')=='success':
+        return level,age(latest,now)>=recovery_age,'schedule_gap' if age(latest,now)>=recovery_age else 'recent'
+    elapsed = age(latest,now,'updated_at' if latest.get('updated_at') else 'created_at')
+    failures=0
+    for r in candidates:
+        if age(r,now)>90: break
+        if r.get('status')=='completed' and r.get('conclusion')=='success': break
+        if r.get('status')=='completed': failures+=1
+    recovery = next((r for r in candidates if r.get('event')=='workflow_dispatch'),None)
+    cooldown_ok = failures<2 or recovery is None or age(recovery,now)>=failure_cooldown
+    ready = elapsed>=2 and cooldown_ok
+    return ('critical' if level=='critical' else 'warning'),ready,'retry_failure' if ready else 'failure_cooldown'
 
 
 def github_request(url, token, method="GET", data=None):
@@ -92,17 +67,21 @@ def github_request(url, token, method="GET", data=None):
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "muse-approval-watchdog",
     }
+    if data is not None:
+        headers["Content-Type"] = "application/json"
     request = Request(url, headers=headers, method=method, data=data)
-    for attempt in range(3):
+    # A lost POST response may already have created a run. Recheck next tick.
+    attempts = 3 if method == "GET" else 1
+    for attempt in range(attempts):
         try:
             with urlopen(request, timeout=20) as response:
                 body = response.read()
                 return json.loads(body) if body else None
         except HTTPError as error:
-            if error.code not in {429, 500, 502, 503, 504} or attempt == 2:
+            if error.code not in {429, 500, 502, 503, 504} or attempt == attempts - 1:
                 raise
         except (URLError, TimeoutError):
-            if attempt == 2:
+            if attempt == attempts - 1:
                 raise
         time.sleep(2 * (attempt + 1))
 
@@ -125,9 +104,9 @@ def append_summary(level, detail, recovery):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--recovery-age", type=int, default=22)
-    parser.add_argument("--warning-age", type=int, default=30)
-    parser.add_argument("--critical-age", type=int, default=90)
+    parser.add_argument("--recovery-age", type=int, default=17)
+    parser.add_argument("--warning-age", type=int, default=25)
+    parser.add_argument("--critical-age", type=int, default=60)
     parser.add_argument("--no-recovery", action="store_true", help="check health only; do not dispatch")
     args = parser.parse_args()
     repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
@@ -137,10 +116,12 @@ def main():
         print("MUSE_WATCHDOG=ERROR missing_github_context", flush=True)
         return 2
     base = f"https://api.github.com/repos/{repo}/actions/workflows/{WORKFLOW}"
-    query_url = base + "/runs?per_page=50"
+    query_url = base + "/runs?per_page=100&branch=" + quote(branch, safe="")
     try:
         payload = github_request(query_url, token)
-        runs = (payload or {}).get("workflow_runs", [])
+        if not isinstance(payload, dict) or not isinstance(payload.get("workflow_runs"), list):
+            raise ValueError("invalid workflow runs response")
+        runs = payload["workflow_runs"]
         level, dispatch, reason = assess(
             runs, datetime.now(timezone.utc),
             recovery_age=args.recovery_age,

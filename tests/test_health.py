@@ -15,6 +15,7 @@ NOW = datetime(2026, 11, 16, 4, 0, tzinfo=timezone.utc)
 def run(minutes, status="completed", conclusion="success", event="schedule"):
     return {
         "event": event, "status": status, "conclusion": conclusion,
+        "display_title": "Muse watcher / apply" if event == "workflow_dispatch" else "",
         "created_at": (NOW - timedelta(minutes=minutes)).isoformat().replace("+00:00", "Z"),
     }
 
@@ -23,32 +24,32 @@ class WatchdogTests(unittest.TestCase):
     def test_recent_success_no_recovery(self):
         self.assertEqual(assess([run(5)], NOW)[:2], ("healthy", False))
 
-    def test_fifteen_minute_schedule_grace_prevents_extra_dispatch(self):
-        # A normal 15-minute scheduled watcher must not cause a recovery run.
-        self.assertEqual(assess([run(15)], NOW)[:2], ("healthy", False))
-        self.assertEqual(assess([run(21.9)], NOW)[:2], ("healthy", False))
+    def test_ten_minute_schedule_grace_prevents_extra_dispatch(self):
+        # A normal 10-minute scheduled watcher must not cause a recovery run.
+        self.assertEqual(assess([run(10)], NOW)[:2], ("healthy", False))
+        self.assertEqual(assess([run(16.9)], NOW)[:2], ("healthy", False))
 
-    def test_missed_fifteen_minute_schedule_starts_recovery_after_grace(self):
+    def test_missed_ten_minute_schedule_starts_recovery_after_grace(self):
         # Recover after one skipped slot plus a seven-minute grace period.
-        level, dispatch, reason = assess([run(23)], NOW)
+        level, dispatch, reason = assess([run(17)], NOW)
         self.assertTrue(dispatch)
-        self.assertIn("watcher_missing_schedule", reason)
+        self.assertIn("schedule_gap", reason)
         self.assertEqual(level, "healthy")
 
     def test_delayed_31_minutes_auto_recovers_without_failure_mail(self):
         level, dispatch, reason = assess([run(30.8)], NOW)
         self.assertEqual((level, dispatch), ("warning", True))
-        self.assertIn("watcher_missing_schedule", reason)
+        self.assertIn("schedule_gap", reason)
 
     def test_active_recent_workflow_dispatch_prevents_duplicate(self):
         level, dispatch, reason = assess([
             run(30.8), run(3, "in_progress", None, "workflow_dispatch")
         ], NOW)
-        self.assertEqual((level, dispatch), ("healthy", False))
+        self.assertEqual((level, dispatch), ("warning", False))
 
-    def test_stale_queue_is_recovered(self):
+    def test_stale_queue_is_not_duplicated(self):
         self.assertEqual(
-            assess([run(26, "queued", None)], NOW)[:2], ("warning", True)
+            assess([run(26, "queued", None)], NOW)[:2], ("warning", False)
         )
 
     def test_recent_failed_job_is_recovered_with_cooldown(self):
@@ -82,15 +83,15 @@ class WatchdogTests(unittest.TestCase):
             self.assertEqual(request.call_count, 1)
             self.assertEqual(request.call_args.kwargs.get("method", "GET"), "GET")
 
-    def test_two_consecutive_failures_suppress_futile_extra_dispatch(self):
-        # Scheduled checks continue. Only Watchdog's extra dispatches pause.
+    def test_two_consecutive_failures_allow_first_extra_dispatch(self):
+        # A first recovery is allowed; subsequent extra dispatches cool down.
         runs = [
             run(4, "completed", "failure"),
             run(50, "completed", "failure"),
         ]
         level, dispatch, reason = assess(runs, NOW)
-        self.assertEqual((level, dispatch), ("warning", False))
-        self.assertIn("recovery_circuit_open", reason)
+        self.assertEqual((level, dispatch), ("warning", True))
+        self.assertIn("retry_failure", reason)
 
     def test_repeated_failures_pause_watchdog_recovery(self):
         # Three consecutive failed jobs should not dispatch a fourth
@@ -102,7 +103,7 @@ class WatchdogTests(unittest.TestCase):
         ]
         severity, dispatch, reason = assess(runs, NOW)
         self.assertEqual((severity, dispatch), ("warning", False))
-        self.assertIn("recovery_circuit_open", reason)
+        self.assertIn("failure_cooldown", reason)
 
     def test_recovery_resumes_after_cooldown_and_success_resets_breaker(self):
         recent_failures = [
@@ -110,9 +111,8 @@ class WatchdogTests(unittest.TestCase):
             run(60, "completed", "failure"),
             run(80, "completed", "failure"),
         ]
-        self.assertEqual(assess(recent_failures, NOW)[:2], ("warning", False))
-        # After the critical-age cooldown, an external dispatch is allowed
-        # again if GitHub cron remained silent the entire period.
+        self.assertEqual(assess(recent_failures, NOW)[:2], ("critical", True))
+        # A long outage still permits a recovery attempt.
         old_failures = [
             run(91, "completed", "failure"),
             run(105, "completed", "failure"),
@@ -126,8 +126,8 @@ class WatchdogTests(unittest.TestCase):
         ]
         self.assertEqual(assess(with_success, NOW)[:2], ("healthy", False))
 
-    def test_critical_90_minute_outage_still_alerts(self):
-        self.assertEqual(assess([run(91)], NOW)[:2], ("critical", True))
+    def test_critical_60_minute_outage_still_alerts(self):
+        self.assertEqual(assess([run(61)], NOW)[:2], ("critical", True))
 
     def test_no_runs_attempts_recovery(self):
         self.assertEqual(assess([], NOW)[:2], ("warning", True))

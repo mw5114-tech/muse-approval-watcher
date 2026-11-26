@@ -21,7 +21,12 @@ TERMINAL = {"completed"}
 
 
 def parse_iso(value):
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if not isinstance(value, str):
+        raise ValueError("invalid timestamp type")
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("timestamp missing timezone")
+    return parsed
 
 
 def age(item, now, field='created_at'):
@@ -127,6 +132,26 @@ def github_request(url, token, method="GET", data=None):
         time.sleep(2 * (attempt + 1))
 
 
+def api_error_detail(error):
+    """Expose failure category and HTTP status, never URLs, tokens or bodies."""
+    if isinstance(error, HTTPError):
+        status = error.code
+        if status in {401, 403}:
+            category = "auth_permission_or_rate_limit"
+        elif status == 404:
+            category = "resource_not_found_or_inaccessible"
+        elif status == 429:
+            category = "rate_limited"
+        elif status >= 500:
+            category = "github_server_error"
+        else:
+            category = "http_error"
+        return f"{category} http_status={status}"
+    if isinstance(error, (URLError, TimeoutError)):
+        return "network_or_timeout"
+    return f"response_error type={type(error).__name__}"
+
+
 def append_summary(level, detail, recovery):
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not path:
@@ -169,9 +194,16 @@ def main():
             warning_age=args.warning_age,
             critical_age=args.critical_age,
         )
-    except (HTTPError, URLError, ValueError, TimeoutError, KeyError) as error:
-        print(f"MUSE_WATCHDOG=ERROR read_api={type(error).__name__}", flush=True)
-        append_summary("error", "github_api_unavailable", "none")
+    except (HTTPError, URLError, TimeoutError) as error:
+        detail = api_error_detail(error)
+        print(f"::error title=Muse watchdog API read::{detail}", flush=True)
+        print(f"MUSE_WATCHDOG=ERROR read_api={detail}", flush=True)
+        append_summary("error", detail, "none")
+        return 2
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        detail = f"invalid_workflow_run_data type={type(error).__name__}"
+        print(f"::error title=Muse watchdog data validation::{detail}", flush=True)
+        append_summary("error", detail, "none")
         return 2
 
     emit_diagnostics(runs, datetime.now(timezone.utc))
@@ -191,8 +223,10 @@ def main():
             recovery = "workflow_dispatch_accepted"
             print(f"MUSE_WATCHDOG=RECOVERY_STARTED reason={reason}", flush=True)
         except (HTTPError, URLError, ValueError, TimeoutError) as error:
-            print(f"MUSE_WATCHDOG=ERROR dispatch_api={type(error).__name__}", flush=True)
-            append_summary("error", reason, "dispatch_failed")
+            detail = api_error_detail(error)
+            print(f"::error title=Muse watchdog dispatch::{detail}", flush=True)
+            print(f"MUSE_WATCHDOG=ERROR dispatch_api={detail}", flush=True)
+            append_summary("error", detail, "dispatch_failed")
             return 2
     print(f"MUSE_WATCHDOG={level.upper()} reason={reason} recovery={recovery}", flush=True)
     append_summary(level, reason, recovery)
@@ -200,7 +234,10 @@ def main():
     # A dispatch was accepted, so a gap alone is not a failure; the next
     # watchdog run will re-check. Avoid false "all jobs failed" notifications
     # for transient GitHub scheduling delays.
-    return 1 if level in {"error", "critical"} else 0
+    if level in {"error", "critical"}:
+        print(f"::error title=Muse watchdog health failure::level={level} reason={reason} recovery={recovery}", flush=True)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

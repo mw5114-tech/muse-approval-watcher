@@ -28,7 +28,7 @@ def age(item, now, field='created_at'):
     return max(0, (now-parse_iso(item[field])).total_seconds()/60)
 
 
-def assess(runs, now, recovery_age=22, warning_age=30, critical_age=60, stuck_age=25, failure_cooldown=30):
+def assess(runs, now, recovery_age=17, warning_age=25, critical_age=60, stuck_age=20, failure_cooldown=30):
     """Decide recovery using apply history; never dispatch into an active run."""
     candidates = sorted((r for r in runs if r.get('created_at') and (r.get('event')=='schedule' or (r.get('event')=='workflow_dispatch' and r.get('display_title')=='Muse watcher / apply'))), key=lambda r:r['created_at'], reverse=True)
     active = [r for r in runs if r.get('status') in ACTIVE and r.get('created_at')]
@@ -104,8 +104,8 @@ def append_summary(level, detail, recovery):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--recovery-age", type=int, default=22)
-    parser.add_argument("--warning-age", type=int, default=30)
+    parser.add_argument("--recovery-age", type=int, default=17)
+    parser.add_argument("--warning-age", type=int, default=25)
     parser.add_argument("--critical-age", type=int, default=60)
     parser.add_argument("--no-recovery", action="store_true", help="check health only; do not dispatch")
     args = parser.parse_args()
@@ -119,7 +119,9 @@ def main():
     query_url = base + "/runs?per_page=100&branch=" + quote(branch, safe="")
     try:
         payload = github_request(query_url, token)
-        runs = (payload or {}).get("workflow_runs", [])
+        if not isinstance(payload, dict) or not isinstance(payload.get("workflow_runs"), list):
+            raise ValueError("invalid workflow runs response")
+        runs = payload["workflow_runs"]
         level, dispatch, reason = assess(
             runs, datetime.now(timezone.utc),
             recovery_age=args.recovery_age,

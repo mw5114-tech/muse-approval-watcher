@@ -1,0 +1,44 @@
+name: Muse external health monitor
+
+on:
+  workflow_run:
+    workflows: ['Muse approval watcher (10m)']
+    types: [completed]
+    branches: [main]
+
+# This workflow only reports outcomes. No checkout, approval, or dispatch.
+permissions: {}
+
+jobs:
+  report:
+    # Manual/observe/recovery runs must not hide a missed scheduled run.
+    if: ${{ github.event.workflow_run.event == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Report scheduled run outcome to Healthchecks.io
+        env:
+          PING_URL: ${{ secrets.MUSE_HEALTHCHECKS_PING_URL }}
+          OUTCOME: ${{ github.event.workflow_run.conclusion }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$PING_URL" ]]; then
+            echo "::notice::Healthchecks not configured; add MUSE_HEALTHCHECKS_PING_URL as a repository secret."
+            exit 0
+          fi
+          # Accept only a check-specific UUID URL on the official ping host.
+          if [[ ! "$PING_URL" =~ ^https://hc-ping\.com/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?$ ]]; then
+            echo "::error::Invalid Healthchecks ping URL format."
+            exit 1
+          fi
+          target="${PING_URL%/}"
+          if [[ "$OUTCOME" != success ]]; then
+            target="$target/fail"
+          fi
+          # No request body, credentials, or logs from Muse are transmitted.
+          if ! curl --fail --silent --output /dev/null --max-time 8 --retry 2 --retry-max-time 25 "$target"; then
+            echo "::error::Healthchecks signal delivery failed."
+            exit 1
+          fi
+          echo "Healthchecks outcome reported: $OUTCOME"

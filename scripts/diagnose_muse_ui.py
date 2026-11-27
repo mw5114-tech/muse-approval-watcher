@@ -63,6 +63,24 @@ def stats(page, stage):
     )
 
 
+def review_observation_probe(page, stage):
+    """Read-only counts; never click or expose request contents."""
+    panel = page.locator('[data-testid="hatch-status-panel-sliding-surface"]')
+    counts = {
+        "panel_visible": count_visible(panel)[1],
+        "known_cards_visible": count_visible(page.locator(CARD))[1],
+        "panel_cards_visible": count_visible(panel.locator(CARD))[1],
+        "history_heading_visible": count_visible(panel.get_by_text(
+            re.compile(r"^(?:승인 내역|Approval history)$", re.I)))[1],
+        "pending_heading_visible": count_visible(panel.get_by_text(
+            re.compile(r"^(?:검토 필요|Needs review|Review needed)$", re.I)))[1],
+        "review_tabs_visible": sum(1 for tab in review_tabs(page).all()[:12]
+                                   if visible(tab)),
+    }
+    print("MUSE_REVIEW_OBSERVATION stage=" + stage + " state=" + review_state(page)
+          + " " + " ".join(f"{k}={v}" for k,v in counts.items()), flush=True)
+
+
 def click_review_navigation(page):
     choices = (
         page.get_by_role("button", name=REVIEW),
@@ -401,6 +419,7 @@ def main():
             auth_ui_category_probe(page)
             login_form_structure_probe(page, "landing")
             stats(page, "landing")
+            review_observation_probe(page, "landing")
             if auth_status(page) != "AUTHENTICATED_UI_PRESENT":
                 try:
                     response = page.reload(wait_until="domcontentloaded", timeout=30000)
@@ -419,12 +438,14 @@ def main():
             print(f"MUSE_UI_DIAG shared_navigation={entered} review_state={review_state(page)}", flush=True)
             print("MUSE_UI_DIAG visible_tabs=" + ",".join(f"{int(review_tab_match(t))}:{int(review_tab_selected(t))}" for t in review_tabs(page).all()[:12] if visible(t)), flush=True)
             stats(page, "after_account_panel")
+            review_observation_probe(page, "after_account_panel")
             result = "shared_navigation_only"
             print("MUSE_UI_DIAG navigation=" + result, flush=True)
             page.wait_for_timeout(1600)
             stats(page, "after_review_navigation")
             # No generic review-button clicks; the shared navigation is explicit.
             stats(page, "after_review_sequence")
+            review_observation_probe(page, "after_review_sequence")
             inspect_frame_card_counts(page)
             inspect_review_button_structure(page)
             return 0

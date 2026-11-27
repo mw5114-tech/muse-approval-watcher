@@ -1,6 +1,11 @@
 name: Muse external health monitor
 
 on:
+  # Explicit connection-check request; never invokes Muse.
+  push:
+    branches: [main]
+    paths: ['.github/requests/muse-healthcheck-init.json']
+  workflow_dispatch:
   workflow_run:
     workflows: ['Muse approval watcher (10m)']
     types: [completed]
@@ -12,20 +17,20 @@ permissions: {}
 jobs:
   report:
     # Manual/observe/recovery runs must not hide a missed scheduled run.
-    if: ${{ github.event.workflow_run.event == 'schedule' }}
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.event == 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Report scheduled run outcome to Healthchecks.io
         env:
           PING_URL: ${{ secrets.MUSE_HEALTHCHECKS_PING_URL }}
-          OUTCOME: ${{ github.event.workflow_run.conclusion }}
+          OUTCOME: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion || 'initialization' }}
         shell: bash
         run: |
           set -euo pipefail
           if [[ -z "$PING_URL" ]]; then
             echo "::notice::Healthchecks not configured; add MUSE_HEALTHCHECKS_PING_URL as a repository secret."
-            exit 0
+            exit 1
           fi
           # Accept only a check-specific UUID URL on the official ping host.
           if [[ ! "$PING_URL" =~ ^https://hc-ping\.com/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?$ ]]; then
@@ -33,6 +38,7 @@ jobs:
             exit 1
           fi
           target="${PING_URL%/}"
+          # Initialization deliberately sends failure, never a false success.
           if [[ "$OUTCOME" != success ]]; then
             target="$target/fail"
           fi
